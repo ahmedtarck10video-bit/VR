@@ -17,16 +17,17 @@ import kotlin.math.min
 object ModelFileLoader {
 
     fun loadModelFromUri(context: Context, uri: Uri): Model3D? {
-        val fileName = getFileName(context, uri) ?: "Imported 3D Model"
+        val rawName = getFileName(context, uri) ?: "Imported 3D Model"
+        val displayName = formatCleanName(rawName)
         return try {
             context.contentResolver.openInputStream(uri)?.use { inputStream ->
                 val bytes = inputStream.readBytes()
-                val triangles = parseModelBytes(bytes, fileName)
+                val triangles = parseModelBytes(bytes, rawName)
                 if (triangles.isNotEmpty()) {
                     val normalized = normalizeAndCenterMesh(triangles)
                     Model3D(
-                        name = fileName,
-                        description = "${normalized.size} polygons loaded (${getFileFormatLabel(fileName)})",
+                        name = displayName,
+                        description = "${normalized.size} polygons loaded (${getFileFormatLabel(rawName)})",
                         triangles = normalized
                     )
                 } else {
@@ -36,6 +37,17 @@ object ModelFileLoader {
         } catch (e: Exception) {
             e.printStackTrace()
             null
+        }
+    }
+
+    private fun formatCleanName(raw: String): String {
+        val ext = raw.substringAfterLast('.', "").uppercase()
+        val base = raw.substringBeforeLast('.')
+        return if (base.length > 20 || base.startsWith("SDOC", ignoreCase = true) || base.contains("-")) {
+            val formatTag = if (ext.isNotEmpty()) " [$ext]" else ""
+            "3D Model$formatTag"
+        } else {
+            raw
         }
     }
 

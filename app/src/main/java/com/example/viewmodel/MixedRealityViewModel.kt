@@ -97,10 +97,9 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
 
     init {
         sensorTracker.start()
-        val defaultModels = com.example.math3d.MeshGenerator.getDefaultModels()
         _uiState.value = _uiState.value.copy(
-            models = defaultModels,
-            currentModel = defaultModels.firstOrNull(),
+            models = emptyList(),
+            currentModel = null,
             selectedModelIndex = 0
         )
         viewModelScope.launch {
@@ -132,11 +131,11 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
                     models = updatedModels,
                     selectedModelIndex = 0,
                     isLoadingModel = false,
-                    rotX = 0.2f,
-                    rotY = 0.4f,
+                    rotX = 0.15f,
+                    rotY = 0.35f,
                     scale = 1.0f,
                     panX = 0f,
-                    panY = 0f
+                    panY = 120f
                 )
                 showNotification("Loaded: ${model.name} (${model.triangles.size} polygons)")
             } else {
@@ -205,13 +204,24 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
 
     fun resetView() {
         _uiState.value = _uiState.value.copy(
-            rotX = 0.2f,
-            rotY = 0.4f,
+            rotX = 0.15f,
+            rotY = 0.35f,
             scale = 1.0f,
             panX = 0f,
-            panY = 0f
+            panY = 120f
         )
         showNotification("View Reset")
+    }
+
+    fun resetPosition() {
+        _uiState.value = _uiState.value.copy(
+            panX = 0f,
+            panY = 120f,
+            scale = 1.0f,
+            rotX = 0.15f,
+            rotY = 0.35f
+        )
+        showNotification("Anchored to floor")
     }
 
     fun showNotification(msg: String) {

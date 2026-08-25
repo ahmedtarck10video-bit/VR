@@ -110,12 +110,16 @@ fun SpatialMainScreen(
                         .fillMaxSize()
                         .background(Color.Black)
                         .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                viewModel.updateRotation(
-                                    deltaX = -pan.y * 0.008f,
-                                    deltaY = pan.x * 0.008f
-                                )
-                                viewModel.updateScale(zoom)
+                            detectTransformGestures { _, pan, zoom, rotation ->
+                                if (pan.x != 0f || pan.y != 0f) {
+                                    viewModel.updatePan(pan.x, pan.y)
+                                }
+                                if (zoom != 1.0f) {
+                                    viewModel.updateScale(zoom)
+                                }
+                                if (rotation != 0f) {
+                                    viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
+                                }
                             }
                         }
                 ) {
@@ -132,7 +136,8 @@ fun SpatialMainScreen(
                                 panY = uiState.panY,
                                 wireframe = uiState.isWireframe,
                                 primaryColor = uiState.modelColor,
-                                drawShadow = false
+                                drawShadow = true,
+                                drawFloorGrid = false
                             )
                         }
                     } else {
@@ -173,7 +178,7 @@ fun SpatialMainScreen(
             }
 
             SpatialMode.AR -> {
-                // AR Mode: Real Camera Passthrough + 3D Model Overlay
+                // AR Mode: Real Camera Passthrough + Ground Anchored 3D Model
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -185,31 +190,38 @@ fun SpatialMainScreen(
 
                         // 3D Object Overlay
                         if (currentModel != null) {
+                            val gyroPitch = uiState.sensorOrientation.pitch * 0.015f
+                            val gyroRoll = uiState.sensorOrientation.roll * 0.015f
                             Canvas(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .pointerInput(Unit) {
-                                        detectTransformGestures { _, pan, zoom, _ ->
-                                            viewModel.updateRotation(
-                                                deltaX = -pan.y * 0.008f,
-                                                deltaY = pan.x * 0.008f
-                                            )
-                                            viewModel.updateScale(zoom)
+                                        detectTransformGestures { _, pan, zoom, rotation ->
+                                            if (pan.x != 0f || pan.y != 0f) {
+                                                viewModel.updatePan(pan.x, pan.y)
+                                            }
+                                            if (zoom != 1.0f) {
+                                                viewModel.updateScale(zoom)
+                                            }
+                                            if (rotation != 0f) {
+                                                viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
+                                            }
                                         }
                                     }
                             ) {
                                 renderer.render(
                                     drawScope = this,
                                     model = currentModel,
-                                    rotX = uiState.rotX,
-                                    rotY = uiState.rotY,
+                                    rotX = uiState.rotX + gyroPitch,
+                                    rotY = uiState.rotY + gyroRoll,
                                     rotZ = 0f,
                                     scale = uiState.scale,
                                     panX = uiState.panX,
                                     panY = uiState.panY,
                                     wireframe = uiState.isWireframe,
                                     primaryColor = uiState.modelColor,
-                                    drawShadow = false
+                                    drawShadow = true,
+                                    drawFloorGrid = true
                                 )
                             }
                         }
@@ -250,78 +262,93 @@ fun SpatialMainScreen(
             }
 
             SpatialMode.MR -> {
-                // Stereoscopic Dual View
-                Row(
+                // Stereoscopic Dual View with Passthrough
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black)
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                viewModel.updateRotation(
-                                    deltaX = -pan.y * 0.008f,
-                                    deltaY = pan.x * 0.008f
-                                )
-                                viewModel.updateScale(zoom)
-                            }
-                        }
                 ) {
-                    val headPitch = uiState.sensorOrientation.pitch * 0.03f
-                    val headRoll = uiState.sensorOrientation.roll * 0.03f
-
-                    // Left Eye
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                    ) {
-                        if (currentModel != null) {
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                renderer.render(
-                                    drawScope = this,
-                                    model = currentModel,
-                                    rotX = uiState.rotX + headPitch,
-                                    rotY = uiState.rotY + headRoll - (uiState.ipdDistance * 0.5f),
-                                    rotZ = 0f,
-                                    scale = uiState.scale * 0.85f,
-                                    panX = uiState.panX - 20f,
-                                    panY = uiState.panY,
-                                    wireframe = uiState.isWireframe,
-                                    primaryColor = uiState.modelColor,
-                                    drawShadow = false
-                                )
-                            }
-                        }
+                    if (hasCameraPermission) {
+                        CameraPreview(modifier = Modifier.fillMaxSize())
                     }
 
-                    // Divider
-                    Box(
+                    Row(
                         modifier = Modifier
-                            .width(1.5.dp)
-                            .fillMaxHeight()
-                            .background(Color(0x33FFFFFF))
-                    )
-
-                    // Right Eye
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTransformGestures { _, pan, zoom, rotation ->
+                                    if (pan.x != 0f || pan.y != 0f) {
+                                        viewModel.updatePan(pan.x, pan.y)
+                                    }
+                                    if (zoom != 1.0f) {
+                                        viewModel.updateScale(zoom)
+                                    }
+                                    if (rotation != 0f) {
+                                        viewModel.updateRotation(0f, rotation * 0.02f)
+                                    }
+                                }
+                            }
                     ) {
-                        if (currentModel != null) {
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                renderer.render(
-                                    drawScope = this,
-                                    model = currentModel,
-                                    rotX = uiState.rotX + headPitch,
-                                    rotY = uiState.rotY + headRoll + (uiState.ipdDistance * 0.5f),
-                                    rotZ = 0f,
-                                    scale = uiState.scale * 0.85f,
-                                    panX = uiState.panX + 20f,
-                                    panY = uiState.panY,
-                                    wireframe = uiState.isWireframe,
-                                    primaryColor = uiState.modelColor,
-                                    drawShadow = false
-                                )
+                        val headPitch = uiState.sensorOrientation.pitch * 0.02f
+                        val headRoll = uiState.sensorOrientation.roll * 0.02f
+
+                        // Left Eye
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        ) {
+                            if (currentModel != null) {
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    renderer.render(
+                                        drawScope = this,
+                                        model = currentModel,
+                                        rotX = uiState.rotX + headPitch,
+                                        rotY = uiState.rotY + headRoll - (uiState.ipdDistance * 0.4f),
+                                        rotZ = 0f,
+                                        scale = uiState.scale * 0.85f,
+                                        panX = uiState.panX - 20f,
+                                        panY = uiState.panY,
+                                        wireframe = uiState.isWireframe,
+                                        primaryColor = uiState.modelColor,
+                                        drawShadow = true,
+                                        drawFloorGrid = true
+                                    )
+                                }
+                            }
+                        }
+
+                        // Divider
+                        Box(
+                            modifier = Modifier
+                                .width(2.dp)
+                                .fillMaxHeight()
+                                .background(Color(0x66FFFFFF))
+                        )
+
+                        // Right Eye
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        ) {
+                            if (currentModel != null) {
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    renderer.render(
+                                        drawScope = this,
+                                        model = currentModel,
+                                        rotX = uiState.rotX + headPitch,
+                                        rotY = uiState.rotY + headRoll + (uiState.ipdDistance * 0.4f),
+                                        rotZ = 0f,
+                                        scale = uiState.scale * 0.85f,
+                                        panX = uiState.panX + 20f,
+                                        panY = uiState.panY,
+                                        wireframe = uiState.isWireframe,
+                                        primaryColor = uiState.modelColor,
+                                        drawShadow = true,
+                                        drawFloorGrid = true
+                                    )
+                                }
                             }
                         }
                     }
@@ -379,47 +406,13 @@ fun SpatialMainScreen(
         // -------------------------------------------------------------
         // BOTTOM PILL BAR: [ PHOTO | (● REC) | Open | Clear ]
         // -------------------------------------------------------------
-        Column(
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(bottom = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentAlignment = Alignment.Center
         ) {
-            // Model Selector Chips
-            if (uiState.models.size > 1) {
-                androidx.compose.foundation.lazy.LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(uiState.models.size) { index ->
-                        val model = uiState.models[index]
-                        val isSelected = index == uiState.selectedModelIndex
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (isSelected) Color(0xDDFFFFFF) else Color(0x661E293B))
-                                .border(
-                                    width = 1.dp,
-                                    color = if (isSelected) Color.White else Color(0x33FFFFFF),
-                                    shape = RoundedCornerShape(16.dp)
-                                )
-                                .clickable { viewModel.selectModel(index) }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = model.name,
-                                color = if (isSelected) Color.Black else Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
-
             AppleLiquidBottomControls(
                 isRecording = uiState.isRecording,
                 onPhotoClick = { viewModel.triggerPhotoCapture() },

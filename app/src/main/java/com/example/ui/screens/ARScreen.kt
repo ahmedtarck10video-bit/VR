@@ -6,6 +6,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,6 +53,9 @@ fun ARScreen(
     val renderer = remember { Renderer3D() }
     val currentModel = uiState.models.getOrNull(uiState.selectedModelIndex) ?: return
 
+    val gyroPitch = uiState.sensorOrientation.pitch * 0.015f
+    val gyroRoll = uiState.sensorOrientation.roll * 0.015f
+
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         if (hasCameraPermission) {
             CameraPreview(modifier = Modifier.fillMaxSize())
@@ -59,27 +64,42 @@ fun ARScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            viewModel.updateRotation(
-                                deltaX = -pan.y * 0.008f,
-                                deltaY = pan.x * 0.008f
-                            )
-                            viewModel.updateScale(zoom)
+                        detectTapGestures(
+                            onDoubleTap = {
+                                viewModel.resetPosition()
+                            }
+                        )
+                    }
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, rotation ->
+                            // 1. Pan moves model on screen / room (drag down to floor or anywhere!)
+                            if (pan.x != 0f || pan.y != 0f) {
+                                viewModel.updatePan(pan.x, pan.y)
+                            }
+                            // 2. Zoom scales model
+                            if (zoom != 1.0f) {
+                                viewModel.updateScale(zoom)
+                            }
+                            // 3. Rotation gesture rotates model
+                            if (rotation != 0f) {
+                                viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
+                            }
                         }
                     }
             ) {
                 renderer.render(
                     drawScope = this,
                     model = currentModel,
-                    rotX = uiState.rotX,
-                    rotY = uiState.rotY,
+                    rotX = uiState.rotX + gyroPitch,
+                    rotY = uiState.rotY + gyroRoll,
                     rotZ = 0f,
                     scale = uiState.scale,
                     panX = uiState.panX,
                     panY = uiState.panY,
                     wireframe = uiState.isWireframe,
                     primaryColor = uiState.modelColor,
-                    drawShadow = false
+                    drawShadow = true,
+                    drawFloorGrid = true
                 )
             }
         } else {
