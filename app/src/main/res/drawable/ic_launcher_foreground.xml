@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Headset Visor with Cyan to Blue Gradient -->
+    <path
+        android:pathData="M 23,26 
+                          C 23,19 33,16 54,16 
+                          C 75,16 85,19 85,26 
+                          C 85,38 84,43 78,48 
+                          C 72,53 62,53 58,45 
+                          C 56,42 52,42 50,45 
+                          C 46,53 36,53 30,48 
+                          C 24,43 23,38 23,26 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="23"
+                android:startY="16"
+                android:endX="85"
+                android:endY="53"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#00C4FF" />
+                <item android:offset="0.45" android:color="#0096FF" />
+                <item android:offset="1.0" android:color="#0066FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Top Center Camera / Sensor Pill -->
+    <path
+        android:pathData="M 49,20.5 
+                          L 59,20.5 
+                          A 3,3 0 0,1 62,23.5 
+                          A 3,3 0 0,1 59,26.5 
+                          L 49,26.5 
+                          A 3,3 0 0,1 46,23.5 
+                          A 3,3 0 0,1 49,20.5 Z"
+        android:fillColor="#0052CC" />
+
+    <!-- Smile Arc -->
+    <path
+        android:pathData="M 36,58 
+                          C 40,73 68,73 72,58"
+        android:strokeWidth="7"
+        android:strokeColor="#0091FF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>

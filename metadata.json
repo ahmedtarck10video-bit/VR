@@ -1,0 +1,6 @@
+{
+  "name": "Mixed Reality",
+  "description": "Spatial 3D Studio and Augmented Reality viewer with interactive object inspection, ground surface detection, and stereoscopic VR viewing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
