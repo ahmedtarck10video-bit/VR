@@ -39,6 +39,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.engine.Renderer3D
 import com.example.ui.components.CameraPreview
+import com.example.ui.components.StereoDualCameraPreview
 import com.example.ui.theme.MixedRealityTheme
 import com.example.viewmodel.MRUiState
 import com.example.viewmodel.MixedRealityViewModel
@@ -82,7 +83,7 @@ fun SpatialMainScreen(
         hasCameraPermission = isGranted
     }
 
-    // System File Picker for 3D model files (.obj, .stl, etc.)
+    // System File Picker for 3D model files (.glb, .gltf, .usdz, .obj, .stl, etc.)
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -94,39 +95,31 @@ fun SpatialMainScreen(
     val renderer = remember { Renderer3D() }
     val currentModel = uiState.currentModel
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-    ) {
-        // -------------------------------------------------------------
-        // Main Viewport depending on mode (MR, AR, Object)
-        // -------------------------------------------------------------
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0F172A))) {
         when (uiState.currentMode) {
             SpatialMode.OBJECT -> {
-                // Google 3D Scene Studio Canvas
+                // Object Mode: Studio Canvas with smooth gesture rotation & scaling
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
                                 listOf(
-                                    Color(0xFFFFFFFF),
                                     Color(0xFFF6F8FA),
                                     Color(0xFFECEFF1)
                                 )
                             )
                         )
                         .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, rotation ->
+                            detectTransformGestures { _, pan, zoom, _ ->
                                 if (pan.x != 0f || pan.y != 0f) {
-                                    viewModel.updatePan(pan.x, pan.y)
+                                    viewModel.updateRotation(
+                                        deltaX = -pan.y * 0.008f,
+                                        deltaY = pan.x * 0.008f
+                                    )
                                 }
                                 if (zoom != 1.0f) {
                                     viewModel.updateScale(zoom)
-                                }
-                                if (rotation != 0f) {
-                                    viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
                                 }
                             }
                         }
@@ -140,51 +133,14 @@ fun SpatialMainScreen(
                                 rotY = uiState.rotY,
                                 rotZ = 0f,
                                 scale = uiState.scale,
-                                panX = uiState.panX,
-                                panY = uiState.panY,
+                                panX = 0f,
+                                panY = 0f,
                                 wireframe = uiState.isWireframe,
                                 primaryColor = uiState.modelColor,
-                                drawShadow = true,
-                                drawFloorGrid = false
+                                drawShadow = false,
+                                drawFloorGrid = false,
+                                hdriPreset = uiState.hdriPreset
                             )
-                        }
-
-                        // Top Action Icons (Close X & More Options)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .windowInsetsPadding(WindowInsets.statusBars)
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(
-                                onClick = { viewModel.clearAll() },
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0x15000000))
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Close",
-                                    tint = Color(0xFF3C4043)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { viewModel.toggleWireframe() },
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0x15000000))
-                            ) {
-                                Icon(
-                                    if (uiState.isWireframe) Icons.Default.ViewInAr else Icons.Default.GridOn,
-                                    contentDescription = "Toggle Wireframe",
-                                    tint = Color(0xFF3C4043)
-                                )
-                            }
                         }
                     } else {
                         // Empty State Prompt
@@ -221,7 +177,7 @@ fun SpatialMainScreen(
                                     textAlign = TextAlign.Center
                                 )
                                 Text(
-                                    text = "Supports GLB, GLTF, USDZ, OBJ & STL formats",
+                                    text = "Supports GLB, GLTF, Apple USDZ, OBJ & STL formats",
                                     color = Color(0xFF5F6368),
                                     fontSize = 13.sp
                                 )
@@ -232,7 +188,11 @@ fun SpatialMainScreen(
             }
 
             SpatialMode.AR -> {
-                // AR Mode: Real Camera Passthrough + Ground Anchored 3D Model
+                // AR Mode: Real Camera Passthrough + Gyroscope Space Tracking
+                val gyroPitch = if (uiState.isGyroEnabled) -uiState.sensorOrientation.pitch else 0f
+                val gyroRoll = if (uiState.isGyroEnabled) uiState.sensorOrientation.roll else 0f
+                val gyroYaw = if (uiState.isGyroEnabled) uiState.sensorOrientation.yaw else 0f
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -242,10 +202,8 @@ fun SpatialMainScreen(
                         // Direct Camera Stream
                         CameraPreview(modifier = Modifier.fillMaxSize())
 
-                        // 3D Object Overlay
+                        // 3D Object Overlay with Gyroscope integration
                         if (currentModel != null) {
-                            val gyroPitch = uiState.sensorOrientation.pitch * 0.015f
-                            val gyroRoll = uiState.sensorOrientation.roll * 0.015f
                             Canvas(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -268,14 +226,15 @@ fun SpatialMainScreen(
                                     model = currentModel,
                                     rotX = uiState.rotX + gyroPitch,
                                     rotY = uiState.rotY + gyroRoll,
-                                    rotZ = 0f,
+                                    rotZ = gyroYaw * 0.5f,
                                     scale = uiState.scale,
-                                    panX = uiState.panX,
-                                    panY = uiState.panY,
-                                    wireframe = uiState.isWireframe,
+                                    panX = uiState.panX + (gyroRoll * 200f),
+                                    panY = uiState.panY - (gyroPitch * 200f),
+                                    wireframe = false,
                                     primaryColor = uiState.modelColor,
-                                    drawShadow = true,
-                                    drawFloorGrid = true
+                                    drawShadow = false,
+                                    drawFloorGrid = false,
+                                    hdriPreset = uiState.hdriPreset
                                 )
                             }
                         }
@@ -316,93 +275,91 @@ fun SpatialMainScreen(
             }
 
             SpatialMode.MR -> {
-                // Stereoscopic Dual View with Passthrough
+                // =============================================================
+                // MR (MIXED REALITY) STEREO DUAL CAMERA
+                // Dual-eye passthrough with synchronized left and right feeds
+                // =============================================================
+                val gyroPitch = if (uiState.isGyroEnabled) -uiState.sensorOrientation.pitch else 0f
+                val gyroRoll = if (uiState.isGyroEnabled) uiState.sensorOrientation.roll else 0f
+                val gyroYaw = if (uiState.isGyroEnabled) uiState.sensorOrientation.yaw else 0f
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black)
                 ) {
                     if (hasCameraPermission) {
-                        CameraPreview(modifier = Modifier.fillMaxSize())
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .pointerInput(Unit) {
-                                detectTransformGestures { _, pan, zoom, rotation ->
-                                    if (pan.x != 0f || pan.y != 0f) {
-                                        viewModel.updatePan(pan.x, pan.y)
+                        StereoDualCameraPreview(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(Unit) {
+                                    detectTransformGestures { _, pan, zoom, rotation ->
+                                        if (pan.x != 0f || pan.y != 0f) {
+                                            viewModel.updatePan(pan.x, pan.y)
+                                        }
+                                        if (zoom != 1.0f) {
+                                            viewModel.updateScale(zoom)
+                                        }
+                                        if (rotation != 0f) {
+                                            viewModel.updateRotation(0f, rotation * 0.02f)
+                                        }
                                     }
-                                    if (zoom != 1.0f) {
-                                        viewModel.updateScale(zoom)
+                                },
+                            leftOverlay = {
+                                if (currentModel != null) {
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        renderer.render(
+                                            drawScope = this,
+                                            model = currentModel,
+                                            rotX = uiState.rotX + gyroPitch,
+                                            rotY = uiState.rotY + gyroRoll - (uiState.ipdDistance * 0.35f),
+                                            rotZ = gyroYaw * 0.4f,
+                                            scale = uiState.scale * 0.85f,
+                                            panX = uiState.panX - 25f,
+                                            panY = uiState.panY - (gyroPitch * 150f),
+                                            wireframe = false,
+                                            primaryColor = uiState.modelColor,
+                                            drawShadow = false,
+                                            drawFloorGrid = false,
+                                            hdriPreset = uiState.hdriPreset
+                                        )
                                     }
-                                    if (rotation != 0f) {
-                                        viewModel.updateRotation(0f, rotation * 0.02f)
+                                }
+                            },
+                            rightOverlay = {
+                                if (currentModel != null) {
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        renderer.render(
+                                            drawScope = this,
+                                            model = currentModel,
+                                            rotX = uiState.rotX + gyroPitch,
+                                            rotY = uiState.rotY + gyroRoll + (uiState.ipdDistance * 0.35f),
+                                            rotZ = gyroYaw * 0.4f,
+                                            scale = uiState.scale * 0.85f,
+                                            panX = uiState.panX + 25f,
+                                            panY = uiState.panY - (gyroPitch * 150f),
+                                            wireframe = false,
+                                            primaryColor = uiState.modelColor,
+                                            drawShadow = false,
+                                            drawFloorGrid = false,
+                                            hdriPreset = uiState.hdriPreset
+                                        )
                                     }
                                 }
                             }
-                    ) {
-                        val headPitch = uiState.sensorOrientation.pitch * 0.02f
-                        val headRoll = uiState.sensorOrientation.roll * 0.02f
-
-                        // Left Eye
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                        ) {
-                            if (currentModel != null) {
-                                Canvas(modifier = Modifier.fillMaxSize()) {
-                                    renderer.render(
-                                        drawScope = this,
-                                        model = currentModel,
-                                        rotX = uiState.rotX + headPitch,
-                                        rotY = uiState.rotY + headRoll - (uiState.ipdDistance * 0.4f),
-                                        rotZ = 0f,
-                                        scale = uiState.scale * 0.85f,
-                                        panX = uiState.panX - 20f,
-                                        panY = uiState.panY,
-                                        wireframe = uiState.isWireframe,
-                                        primaryColor = uiState.modelColor,
-                                        drawShadow = true,
-                                        drawFloorGrid = true
-                                    )
-                                }
-                            }
-                        }
-
-                        // Divider
-                        Box(
-                            modifier = Modifier
-                                .width(2.dp)
-                                .fillMaxHeight()
-                                .background(Color(0x66FFFFFF))
                         )
-
-                        // Right Eye
+                    } else {
+                        // Camera Permission Request
                         Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            if (currentModel != null) {
-                                Canvas(modifier = Modifier.fillMaxSize()) {
-                                    renderer.render(
-                                        drawScope = this,
-                                        model = currentModel,
-                                        rotX = uiState.rotX + headPitch,
-                                        rotY = uiState.rotY + headRoll + (uiState.ipdDistance * 0.4f),
-                                        rotZ = 0f,
-                                        scale = uiState.scale * 0.85f,
-                                        panX = uiState.panX + 20f,
-                                        panY = uiState.panY,
-                                        wireframe = uiState.isWireframe,
-                                        primaryColor = uiState.modelColor,
-                                        drawShadow = true,
-                                        drawFloorGrid = true
-                                    )
-                                }
+                            Button(
+                                onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                shape = RoundedCornerShape(20.dp)
+                            ) {
+                                Text("Enable Camera for MR", color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -458,52 +415,15 @@ fun SpatialMainScreen(
         }
 
         // -------------------------------------------------------------
-        // BOTTOM ACTION AREA: "View in your space" + Action Pills
+        // BOTTOM PILL BAR: [ PHOTO | (● REC) | Open | Clear ]
         // -------------------------------------------------------------
-        Column(
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(bottom = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(bottom = 20.dp),
+            contentAlignment = Alignment.Center
         ) {
-            // Google Scene Viewer "View in your space" button
-            if (currentModel != null) {
-                Surface(
-                    shape = RoundedCornerShape(32.dp),
-                    color = Color.White,
-                    shadowElevation = 8.dp,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDADCE0)),
-                    modifier = Modifier
-                        .height(48.dp)
-                        .clickable {
-                            launchGoogleSceneViewer(context, currentModel)
-                            viewModel.setMode(SpatialMode.AR)
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CropFree,
-                            contentDescription = "View in your space",
-                            tint = Color(0xFF1A73E8),
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Text(
-                            text = "View in your space",
-                            color = Color(0xFF1A73E8),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-
-            // Controls Pill [ PHOTO | REC | Open | Clear ]
             AppleLiquidBottomControls(
                 isRecording = uiState.isRecording,
                 onPhotoClick = { viewModel.triggerPhotoCapture() },
@@ -753,37 +673,3 @@ fun AppleLiquidBottomControls(
         }
     }
 }
-
-fun launchGoogleSceneViewer(context: android.content.Context, model: com.example.math3d.Model3D) {
-    val fileUri = model.fileUri
-    if (fileUri != null) {
-        try {
-            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
-            val sceneViewerUri = android.net.Uri.parse("https://arvr.google.com/scene-viewer/1.0").buildUpon()
-                .appendQueryParameter("file", fileUri.toString())
-                .appendQueryParameter("mode", "ar_preferred")
-                .appendQueryParameter("title", model.name)
-                .appendQueryParameter("resizable", "true")
-                .build()
-            intent.data = sceneViewerUri
-            intent.setPackage("com.google.android.googlequicksearchbox")
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            try {
-                val fallbackIntent = android.content.Intent(android.content.Intent.ACTION_VIEW)
-                val sceneViewerUri = android.net.Uri.parse("https://arvr.google.com/scene-viewer/1.0").buildUpon()
-                    .appendQueryParameter("file", fileUri.toString())
-                    .appendQueryParameter("mode", "ar_preferred")
-                    .appendQueryParameter("title", model.name)
-                    .build()
-                fallbackIntent.data = sceneViewerUri
-                fallbackIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(fallbackIntent)
-            } catch (e2: Exception) {
-                // Fallback handled in-app
-            }
-        }
-    }
-}
-

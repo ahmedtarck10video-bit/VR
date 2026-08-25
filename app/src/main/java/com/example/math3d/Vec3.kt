@@ -18,6 +18,7 @@ data class Vec3(val x: Float, val y: Float, val z: Float) {
     )
 
     fun length(): Float = sqrt(x * x + y * y + z * z)
+    fun lengthSq(): Float = x * x + y * y + z * z
     fun normalize(): Vec3 {
         val l = length()
         return if (l > 1e-6f) this / l else Vec3(0f, 0f, 0f)

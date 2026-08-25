@@ -2,10 +2,12 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.engine.HdriPreset
 import com.example.engine.SensorOrientation
 import com.example.engine.SensorTracker
 import com.example.math3d.Model3D
@@ -23,6 +25,12 @@ enum class SpatialMode(val label: String) {
     MR("MR"),
     AR("AR"),
     OBJECT("Object")
+}
+
+enum class MRSubMode(val title: String, val desc: String) {
+    STEREO_PASSTHROUGH("Stereo Dual Camera", "Dual-eye passthrough with IPD adjustment for VR/MR glasses"),
+    SPATIAL_HOLO("Spatial Hologram", "Holographic projection with spatial grid and light rings"),
+    SURFACE_ANCHOR("Surface Anchor", "Physics-grounded surface anchor with realistic shadow")
 }
 
 enum class AppTab {
@@ -56,6 +64,7 @@ data class WindowState(
 
 data class MRUiState(
     val currentMode: SpatialMode = SpatialMode.OBJECT,
+    val mrSubMode: MRSubMode = MRSubMode.STEREO_PASSTHROUGH,
     val currentTab: AppTab = AppTab.STUDIO_3D,
     val activeAppId: SpatialAppId = SpatialAppId.STUDIO_3D,
     val openWindows: Map<SpatialAppId, WindowState> = mapOf(
@@ -65,6 +74,7 @@ data class MRUiState(
     val environment: SpatialEnvironment = SpatialEnvironment.HORIZON,
     val spatialAudioEnabled: Boolean = true,
     val currentModel: Model3D? = null,
+    val loadedModelUri: Uri? = null,
     val selectedModelIndex: Int = 0,
     val models: List<Model3D> = emptyList(),
     val rotX: Float = 0.2f,
@@ -74,6 +84,7 @@ data class MRUiState(
     val panY: Float = 0f,
     val isAutoSpin: Boolean = false,
     val isWireframe: Boolean = false,
+    val isGyroEnabled: Boolean = true,
     val modelColor: Color = Color(0xFFE2DCD4),
     val sensorOrientation: SensorOrientation = SensorOrientation(),
     val arSurfaceDetected: Boolean = true,
@@ -82,6 +93,7 @@ data class MRUiState(
     val isRecording: Boolean = false,
     val recordingSeconds: Int = 0,
     val showPhotoFlash: Boolean = false,
+    val hdriPreset: HdriPreset = HdriPreset.STUDIO_PRO,
     val isModelPickerOpen: Boolean = false,
     val isLoadingModel: Boolean = false,
     val notificationMessage: String? = null
@@ -118,9 +130,25 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(currentMode = mode)
     }
 
+    fun setMRSubMode(subMode: MRSubMode) {
+        _uiState.value = _uiState.value.copy(mrSubMode = subMode)
+        showNotification(subMode.title)
+    }
+
+    fun toggleGyro() {
+        val newState = !_uiState.value.isGyroEnabled
+        _uiState.value = _uiState.value.copy(isGyroEnabled = newState)
+        showNotification(if (newState) "Gyroscope Enabled" else "Gyroscope Disabled")
+    }
+
+    fun calibrateGyro() {
+        sensorTracker.calibrate()
+        showNotification("Gyroscope Calibrated")
+    }
+
     fun loadModelFromUri(context: Context, uri: Uri) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoadingModel = true)
+            _uiState.value = _uiState.value.copy(isLoadingModel = true, loadedModelUri = uri)
             val model = withContext(Dispatchers.IO) {
                 ModelFileLoader.loadModelFromUri(context, uri)
             }
@@ -128,6 +156,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
                 val updatedModels = listOf(model) + _uiState.value.models.filter { it.name != model.name }
                 _uiState.value = _uiState.value.copy(
                     currentModel = model,
+                    loadedModelUri = uri,
                     models = updatedModels,
                     selectedModelIndex = 0,
                     isLoadingModel = false,
@@ -135,7 +164,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
                     rotY = 0.35f,
                     scale = 1.0f,
                     panX = 0f,
-                    panY = 120f
+                    panY = 0f
                 )
                 showNotification("Loaded: ${model.name} (${model.triangles.size} polygons)")
             } else {
@@ -144,6 +173,35 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             }
         }
     }
+
+    fun openInGoogleSceneViewer(context: Context) {
+        val uri = _uiState.value.loadedModelUri
+        if (uri == null) {
+            showNotification("Please load a 3D model first")
+            return
+        }
+        try {
+            val sceneViewerIntent = Intent(Intent.ACTION_VIEW)
+            val intentUri = Uri.parse("https://arvr.google.com/scene-viewer/1.0").buildUpon()
+                .appendQueryParameter("file", uri.toString())
+                .appendQueryParameter("mode", "ar_preferred")
+                .appendQueryParameter("resizable", "true")
+                .build()
+            sceneViewerIntent.data = intentUri
+            sceneViewerIntent.setPackage("com.google.android.googlequicksearchbox")
+            sceneViewerIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            context.startActivity(sceneViewerIntent)
+        } catch (e: Exception) {
+            try {
+                val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://arvr.google.com/scene-viewer/1.0?file=$uri&mode=ar_preferred"))
+                genericIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.startActivity(genericIntent)
+            } catch (e2: Exception) {
+                showNotification("Google Scene Viewer not available on this device")
+            }
+        }
+    }
+
 
     fun selectModel(index: Int) {
         if (index in _uiState.value.models.indices) {
@@ -188,6 +246,17 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun setHdriPreset(preset: HdriPreset) {
+        _uiState.value = _uiState.value.copy(hdriPreset = preset)
+        showNotification("HDRi Lighting: ${preset.title}")
+    }
+
+    fun cycleHdriPreset() {
+        val presets = HdriPreset.values()
+        val nextIndex = (presets.indexOf(_uiState.value.hdriPreset) + 1) % presets.size
+        setHdriPreset(presets[nextIndex])
+    }
+
     fun clearAll() {
         _uiState.value = _uiState.value.copy(
             currentModel = null,
@@ -208,7 +277,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             rotY = 0.35f,
             scale = 1.0f,
             panX = 0f,
-            panY = 120f
+            panY = 0f
         )
         showNotification("View Reset")
     }
@@ -216,12 +285,12 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     fun resetPosition() {
         _uiState.value = _uiState.value.copy(
             panX = 0f,
-            panY = 120f,
+            panY = 0f,
             scale = 1.0f,
             rotX = 0.15f,
             rotY = 0.35f
         )
-        showNotification("Anchored to floor")
+        showNotification("Centered Model")
     }
 
     fun showNotification(msg: String) {

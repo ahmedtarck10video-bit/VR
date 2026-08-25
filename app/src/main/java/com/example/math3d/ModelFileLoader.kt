@@ -252,6 +252,22 @@ object ModelFileLoader {
                                         ((g.toLong() and 0xFF) shl 8) or
                                         (b.toLong() and 0xFF)
                             }
+                            if (primColor == 0L && matObj?.has("emissiveFactor") == true) {
+                                val ef = matObj.getJSONArray("emissiveFactor")
+                                val r = (ef.optDouble(0, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                val g = (ef.optDouble(1, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                val b = (ef.optDouble(2, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                primColor = (0xFFL shl 24) or ((r.toLong() and 0xFF) shl 16) or ((g.toLong() and 0xFF) shl 8) or (b.toLong() and 0xFF)
+                            }
+                            val specGloss = matObj?.optJSONObject("extensions")?.optJSONObject("KHR_materials_pbrSpecularGlossiness")
+                            if (primColor == 0L && specGloss?.has("diffuseFactor") == true) {
+                                val df = specGloss.getJSONArray("diffuseFactor")
+                                val r = (df.optDouble(0, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                val g = (df.optDouble(1, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                val b = (df.optDouble(2, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                val a = (df.optDouble(3, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                primColor = ((a.toLong() and 0xFF) shl 24) or ((r.toLong() and 0xFF) shl 16) or ((g.toLong() and 0xFF) shl 8) or (b.toLong() and 0xFF)
+                            }
                         }
                     }
 
@@ -281,6 +297,75 @@ object ModelFileLoader {
                         val skip = byteStride - 12
                         if (skip > 0 && byteBuf.remaining() >= skip) {
                             byteBuf.position(byteBuf.position() + skip)
+                        }
+                    }
+
+                    // Read COLOR_0 if present
+                    val vertexColors = mutableListOf<Long>()
+                    if (attributes.has("COLOR_0")) {
+                        try {
+                            val colAccessorIdx = attributes.getInt("COLOR_0")
+                            val colAccessor = accessors.getJSONObject(colAccessorIdx)
+                            val colBufferViewIdx = colAccessor.getInt("bufferView")
+                            val colBufferView = bufferViews.getJSONObject(colBufferViewIdx)
+                            val colBufferIdx = colBufferView.optInt("buffer", 0)
+                            val colRawBuf = buffersList.getOrNull(colBufferIdx) ?: rawBuffer
+                            val colByteOffset = colBufferView.optInt("byteOffset", 0) + colAccessor.optInt("byteOffset", 0)
+                            val colCount = colAccessor.getInt("count")
+                            val colType = colAccessor.optString("type", "VEC3")
+                            val colComp = colAccessor.optInt("componentType", 5126)
+                            val colStride = colBufferView.optInt("byteStride", 0)
+
+                            val colBuf = ByteBuffer.wrap(colRawBuf).order(ByteOrder.LITTLE_ENDIAN)
+                            colBuf.position(colByteOffset)
+
+                            val isVec4 = colType == "VEC4"
+                            val numComponents = if (isVec4) 4 else 3
+
+                            for (c in 0 until colCount) {
+                                var r = 255
+                                var g = 255
+                                var b = 255
+                                var a = 255
+
+                                if (colComp == 5126) { // FLOAT
+                                    r = (colBuf.float * 255f).toInt().coerceIn(0, 255)
+                                    g = (colBuf.float * 255f).toInt().coerceIn(0, 255)
+                                    b = (colBuf.float * 255f).toInt().coerceIn(0, 255)
+                                    if (isVec4) a = (colBuf.float * 255f).toInt().coerceIn(0, 255)
+                                } else if (colComp == 5121) { // UNSIGNED_BYTE
+                                    r = colBuf.get().toInt() and 0xFF
+                                    g = colBuf.get().toInt() and 0xFF
+                                    b = colBuf.get().toInt() and 0xFF
+                                    if (isVec4) a = colBuf.get().toInt() and 0xFF
+                                } else if (colComp == 5123) { // UNSIGNED_SHORT
+                                    r = ((colBuf.short.toInt() and 0xFFFF) / 257).coerceIn(0, 255)
+                                    g = ((colBuf.short.toInt() and 0xFFFF) / 257).coerceIn(0, 255)
+                                    b = ((colBuf.short.toInt() and 0xFFFF) / 257).coerceIn(0, 255)
+                                    if (isVec4) a = ((colBuf.short.toInt() and 0xFFFF) / 257).coerceIn(0, 255)
+                                }
+
+                                val colLong = ((a.toLong() and 0xFF) shl 24) or
+                                        ((r.toLong() and 0xFF) shl 16) or
+                                        ((g.toLong() and 0xFF) shl 8) or
+                                        (b.toLong() and 0xFF)
+                                vertexColors.add(colLong)
+
+                                val actualBytesRead = numComponents * (if (colComp == 5126) 4 else if (colComp == 5123) 2 else 1)
+                                if (colStride > actualBytesRead && colBuf.remaining() >= colStride - actualBytesRead) {
+                                    colBuf.position(colBuf.position() + colStride - actualBytesRead)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Silently ignore color accessor issues
+                        }
+                    }
+
+                    fun getColorForIndex(idx: Int): Long {
+                        return if (idx in vertexColors.indices) {
+                            vertexColors[idx]
+                        } else {
+                            primColor
                         }
                     }
 
@@ -322,7 +407,8 @@ object ModelFileLoader {
                                 val v2 = vertices[i1]
                                 val v3 = vertices[i2]
                                 val norm = (v2 - v1).cross(v3 - v1).normalize()
-                                triangles.add(Triangle(v1, v2, v3, norm, color = primColor))
+                                val triCol = if (vertexColors.isNotEmpty()) getColorForIndex(i0) else primColor
+                                triangles.add(Triangle(v1, v2, v3, norm, color = triCol))
                             }
                         }
                     } else {
@@ -332,7 +418,8 @@ object ModelFileLoader {
                             val v2 = vertices[i + 1]
                             val v3 = vertices[i + 2]
                             val norm = (v2 - v1).cross(v3 - v1).normalize()
-                            triangles.add(Triangle(v1, v2, v3, norm, color = primColor))
+                            val triCol = if (vertexColors.isNotEmpty()) getColorForIndex(i) else primColor
+                            triangles.add(Triangle(v1, v2, v3, norm, color = triCol))
                         }
                     }
                 }
@@ -391,9 +478,24 @@ object ModelFileLoader {
             var readingPoints = false
             var readingIndices = false
             var readingCounts = false
+            var parsedMaterialColor = 0xFFD6DCE5L // High-fidelity neutral silver default for Apple USDZ meshes
 
             for (line in lines) {
                 val trimmed = line.trim()
+
+                // Check for displayColor or diffuseColor in USDA
+                if (trimmed.contains("color3f[] primvars:displayColor") || trimmed.contains("inputs:diffuseColor") || trimmed.contains("color3f inputs:diffuseColor")) {
+                    val colorMatch = "\\((-?\\d+\\.?\\d*),\\s*(-?\\d+\\.?\\d*),\\s*(-?\\d+\\.?\\d*)\\)".toRegex().find(trimmed)
+                    if (colorMatch != null) {
+                        val cr = (colorMatch.groupValues[1].toFloatOrNull() ?: 1f).coerceIn(0f, 1f)
+                        val cg = (colorMatch.groupValues[2].toFloatOrNull() ?: 1f).coerceIn(0f, 1f)
+                        val cb = (colorMatch.groupValues[3].toFloatOrNull() ?: 1f).coerceIn(0f, 1f)
+                        val rInt = (cr * 255).toInt()
+                        val gInt = (cg * 255).toInt()
+                        val bInt = (cb * 255).toInt()
+                        parsedMaterialColor = (0xFFL shl 24) or (rInt.toLong() shl 16) or (gInt.toLong() shl 8) or bInt.toLong()
+                    }
+                }
 
                 // Check sections
                 if (trimmed.contains("point3f[] points") || trimmed.contains("float3[] points")) {
@@ -463,8 +565,11 @@ object ModelFileLoader {
                                 val v1 = points.getOrNull(polyIndices[i])
                                 val v2 = points.getOrNull(polyIndices[i + 1])
                                 if (v0 != null && v1 != null && v2 != null) {
-                                    val norm = (v1 - v0).cross(v2 - v0).normalize()
-                                    triangles.add(Triangle(v0, v1, v2, norm))
+                                    val edge1 = v1 - v0
+                                    val edge2 = v2 - v0
+                                    var norm = edge1.cross(edge2)
+                                    norm = if (norm.lengthSq() > 1e-6f) norm.normalize() else Vec3(0f, 1f, 0f)
+                                    triangles.add(Triangle(v0, v1, v2, norm, color = parsedMaterialColor))
                                 }
                             }
                         }
@@ -516,20 +621,43 @@ object ModelFileLoader {
     // =========================================================================
     private fun parseObj(reader: BufferedReader): List<Triangle> {
         val vertices = mutableListOf<Vec3>()
+        val vertexColors = mutableListOf<Long>()
         val triangles = mutableListOf<Triangle>()
+        var currentMaterialColor = 0L
 
         reader.forEachLine { rawLine ->
             val line = rawLine.trim()
             if (line.isEmpty() || line.startsWith("#")) return@forEachLine
 
             val parts = line.split("\\s+".toRegex())
-            when (parts.getOrNull(0)) {
+            when (parts.getOrNull(0)?.lowercase()) {
                 "v" -> {
                     if (parts.size >= 4) {
                         val x = parts[1].toFloatOrNull() ?: 0f
                         val y = parts[2].toFloatOrNull() ?: 0f
                         val z = parts[3].toFloatOrNull() ?: 0f
                         vertices.add(Vec3(x, y, z))
+
+                        if (parts.size >= 7) {
+                            val rRaw = parts[4].toFloatOrNull() ?: 1f
+                            val gRaw = parts[5].toFloatOrNull() ?: 1f
+                            val bRaw = parts[6].toFloatOrNull() ?: 1f
+                            val r = (if (rRaw <= 1f && rRaw >= 0f) rRaw * 255f else rRaw).toInt().coerceIn(0, 255)
+                            val g = (if (gRaw <= 1f && gRaw >= 0f) gRaw * 255f else gRaw).toInt().coerceIn(0, 255)
+                            val b = (if (bRaw <= 1f && bRaw >= 0f) bRaw * 255f else bRaw).toInt().coerceIn(0, 255)
+                            val col = (0xFFL shl 24) or ((r.toLong() and 0xFF) shl 16) or ((g.toLong() and 0xFF) shl 8) or (b.toLong() and 0xFF)
+                            vertexColors.add(col)
+                        } else {
+                            vertexColors.add(currentMaterialColor)
+                        }
+                    }
+                }
+                "kd" -> {
+                    if (parts.size >= 4) {
+                        val r = ((parts[1].toFloatOrNull() ?: 1f) * 255f).toInt().coerceIn(0, 255)
+                        val g = ((parts[2].toFloatOrNull() ?: 1f) * 255f).toInt().coerceIn(0, 255)
+                        val b = ((parts[3].toFloatOrNull() ?: 1f) * 255f).toInt().coerceIn(0, 255)
+                        currentMaterialColor = (0xFFL shl 24) or ((r.toLong() and 0xFF) shl 16) or ((g.toLong() and 0xFF) shl 8) or (b.toLong() and 0xFF)
                     }
                 }
                 "f" -> {
@@ -551,11 +679,13 @@ object ModelFileLoader {
                     // Polygon fan triangulation
                     if (faceIndices.size >= 3) {
                         val v0 = vertices[faceIndices[0]]
+                        val col0 = vertexColors.getOrNull(faceIndices[0]) ?: currentMaterialColor
                         for (i in 1 until faceIndices.size - 1) {
                             val v1 = vertices[faceIndices[i]]
                             val v2 = vertices[faceIndices[i + 1]]
                             val norm = (v1 - v0).cross(v2 - v0).normalize()
-                            triangles.add(Triangle(v0, v1, v2, norm))
+                            val triCol = if (col0 != 0L) col0 else (vertexColors.getOrNull(faceIndices[i]) ?: currentMaterialColor)
+                            triangles.add(Triangle(v0, v1, v2, norm, color = triCol))
                         }
                     }
                 }
@@ -606,9 +736,18 @@ object ModelFileLoader {
                 val v3 = Vec3(buffer.float, buffer.float, buffer.float)
                 val attributeByteCount = buffer.short
 
+                var triColor = 0L
+                val attrInt = attributeByteCount.toInt() and 0xFFFF
+                if (attrInt != 0) {
+                    val r = (((attrInt ushr 10) and 0x1F) * 255) / 31
+                    val g = (((attrInt ushr 5) and 0x1F) * 255) / 31
+                    val b = ((attrInt and 0x1F) * 255) / 31
+                    triColor = (0xFFL shl 24) or ((r.toLong() and 0xFF) shl 16) or ((g.toLong() and 0xFF) shl 8) or (b.toLong() and 0xFF)
+                }
+
                 val calcNorm = (v2 - v1).cross(v3 - v1).normalize()
                 val finalNorm = if (calcNorm.length() > 0.001f) calcNorm else normal.normalize()
-                triangles.add(Triangle(v1, v2, v3, finalNorm))
+                triangles.add(Triangle(v1, v2, v3, finalNorm, color = triColor))
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -665,6 +804,7 @@ object ModelFileLoader {
             var faceCount = 0
             var isHeader = true
             val vertices = mutableListOf<Vec3>()
+            val vertexColors = mutableListOf<Long>()
 
             val lines = reader.readLines()
             var lineIdx = 0
@@ -689,6 +829,16 @@ object ModelFileLoader {
                     val y = parts[1].toFloatOrNull() ?: 0f
                     val z = parts[2].toFloatOrNull() ?: 0f
                     vertices.add(Vec3(x, y, z))
+
+                    if (parts.size >= 6) {
+                        val r = parts[3].toIntOrNull()?.coerceIn(0, 255) ?: 255
+                        val g = parts[4].toIntOrNull()?.coerceIn(0, 255) ?: 255
+                        val b = parts[5].toIntOrNull()?.coerceIn(0, 255) ?: 255
+                        val col = (0xFFL shl 24) or ((r.toLong() and 0xFF) shl 16) or ((g.toLong() and 0xFF) shl 8) or (b.toLong() and 0xFF)
+                        vertexColors.add(col)
+                    } else {
+                        vertexColors.add(0L)
+                    }
                 }
                 lineIdx++
             }
@@ -701,11 +851,13 @@ object ModelFileLoader {
                     val indices = (1..count).mapNotNull { parts.getOrNull(it)?.toIntOrNull() }
                     if (indices.size >= 3) {
                         val v0 = vertices[indices[0]]
+                        val col0 = vertexColors.getOrNull(indices[0]) ?: 0L
                         for (i in 1 until indices.size - 1) {
                             val v1 = vertices[indices[i]]
                             val v2 = vertices[indices[i + 1]]
                             val norm = (v1 - v0).cross(v2 - v0).normalize()
-                            triangles.add(Triangle(v0, v1, v2, norm))
+                            val triCol = if (col0 != 0L) col0 else (vertexColors.getOrNull(indices[i]) ?: 0L)
+                            triangles.add(Triangle(v0, v1, v2, norm, color = triCol))
                         }
                     }
                 }
@@ -769,7 +921,7 @@ object ModelFileLoader {
             val v2 = transformVertex(t.v2)
             val v3 = transformVertex(t.v3)
             val norm = (v2 - v1).cross(v3 - v1).normalize()
-            Triangle(v1, v2, v3, norm)
+            Triangle(v1, v2, v3, norm, color = t.color)
         }
     }
 }
