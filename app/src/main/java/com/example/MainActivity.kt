@@ -162,8 +162,8 @@ fun SpatialMainScreen(
                                     textAlign = TextAlign.Center
                                 )
                                 Text(
-                                    text = "Supports .OBJ and .STL files",
-                                    color = Color.White.copy(alpha = 0.4f),
+                                    text = "Supports USDZ, GLB, GLTF, OBJ & STL files",
+                                    color = Color.White.copy(alpha = 0.5f),
                                     fontSize = 12.sp
                                 )
                             }
@@ -379,12 +379,47 @@ fun SpatialMainScreen(
         // -------------------------------------------------------------
         // BOTTOM PILL BAR: [ PHOTO | (● REC) | Open | Clear ]
         // -------------------------------------------------------------
-        Box(
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(bottom = 28.dp)
+                .padding(bottom = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Model Selector Chips
+            if (uiState.models.size > 1) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(uiState.models.size) { index ->
+                        val model = uiState.models[index]
+                        val isSelected = index == uiState.selectedModelIndex
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (isSelected) Color(0xDDFFFFFF) else Color(0x661E293B))
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isSelected) Color.White else Color(0x33FFFFFF),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .clickable { viewModel.selectModel(index) }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = model.name,
+                                color = if (isSelected) Color.Black else Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+
             AppleLiquidBottomControls(
                 isRecording = uiState.isRecording,
                 onPhotoClick = { viewModel.triggerPhotoCapture() },

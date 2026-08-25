@@ -97,6 +97,12 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
 
     init {
         sensorTracker.start()
+        val defaultModels = com.example.math3d.MeshGenerator.getDefaultModels()
+        _uiState.value = _uiState.value.copy(
+            models = defaultModels,
+            currentModel = defaultModels.firstOrNull(),
+            selectedModelIndex = 0
+        )
         viewModelScope.launch {
             sensorTracker.orientation.collect { orientation ->
                 _uiState.value = _uiState.value.copy(sensorOrientation = orientation)
@@ -120,9 +126,10 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
                 ModelFileLoader.loadModelFromUri(context, uri)
             }
             if (model != null && model.triangles.isNotEmpty()) {
+                val updatedModels = listOf(model) + _uiState.value.models.filter { it.name != model.name }
                 _uiState.value = _uiState.value.copy(
                     currentModel = model,
-                    models = listOf(model),
+                    models = updatedModels,
                     selectedModelIndex = 0,
                     isLoadingModel = false,
                     rotX = 0.2f,
@@ -134,7 +141,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
                 showNotification("Loaded: ${model.name} (${model.triangles.size} polygons)")
             } else {
                 _uiState.value = _uiState.value.copy(isLoadingModel = false)
-                showNotification("Could not parse 3D model. Please select an .obj or .stl file.")
+                showNotification("Could not parse 3D model. Supported: .glb, .gltf, .usdz, .obj, .stl")
             }
         }
     }

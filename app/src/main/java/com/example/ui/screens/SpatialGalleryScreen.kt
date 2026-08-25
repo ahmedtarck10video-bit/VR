@@ -41,12 +41,11 @@ fun SpatialGalleryScreen(
 ) {
     val assets = remember {
         listOf(
-            SpatialAsset("MR Spatial Visor", "Hardware", 840, 1680, 0, Icons.Default.ViewInAr),
-            SpatialAsset("Autonomous Drone", "Robotics", 620, 1240, 1, Icons.Default.FlightTakeoff),
-            SpatialAsset("Companion Bot", "AI Unit", 950, 1900, 2, Icons.Default.SmartToy),
-            SpatialAsset("Hologram Cube", "Primitive", 8, 12, 3, Icons.Default.Category),
-            SpatialAsset("Spatial Anchor Tag", "Tracking", 120, 240, 0, Icons.Default.LocationOn),
-            SpatialAsset("Laser Scanner Mesh", "Telemetry", 450, 900, 1, Icons.Default.QrCodeScanner)
+            SpatialAsset("Vision Pro Visor [USDZ]", "Apple AR • USDZ", 840, 1680, 0, Icons.Default.ViewInAr),
+            SpatialAsset("Cyber Drone [GLB]", "Robotics • GLB", 620, 1240, 1, Icons.Default.FlightTakeoff),
+            SpatialAsset("Companion Bot [GLTF]", "AI Unit • GLTF", 950, 1900, 2, Icons.Default.SmartToy),
+            SpatialAsset("Spatial Audio Pod [USDZ]", "Audio • USDZ", 520, 1040, 3, Icons.Default.SurroundSound),
+            SpatialAsset("Hologram Cube [OBJ]", "Primitive • OBJ", 8, 12, 4, Icons.Default.Category)
         )
     }
 
