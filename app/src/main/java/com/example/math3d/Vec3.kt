@@ -42,12 +42,19 @@ data class Vec3(val x: Float, val y: Float, val z: Float) {
     }
 }
 
-data class Triangle(val v1: Vec3, val v2: Vec3, val v3: Vec3, val normal: Vec3) {
+data class Triangle(
+    val v1: Vec3,
+    val v2: Vec3,
+    val v3: Vec3,
+    val normal: Vec3,
+    val color: Long = 0L // 0 means default material
+) {
     val center: Vec3 get() = Vec3((v1.x + v2.x + v3.x) / 3f, (v1.y + v2.y + v3.y) / 3f, (v1.z + v2.z + v3.z) / 3f)
 }
 
 data class Model3D(
     val name: String,
     val description: String,
-    val triangles: List<Triangle>
+    val triangles: List<Triangle>,
+    val fileUri: android.net.Uri? = null
 )

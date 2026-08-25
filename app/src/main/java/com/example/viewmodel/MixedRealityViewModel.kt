@@ -74,7 +74,7 @@ data class MRUiState(
     val panY: Float = 0f,
     val isAutoSpin: Boolean = false,
     val isWireframe: Boolean = false,
-    val modelColor: Color = Color(0xFF00E5FF),
+    val modelColor: Color = Color(0xFFE2DCD4),
     val sensorOrientation: SensorOrientation = SensorOrientation(),
     val arSurfaceDetected: Boolean = true,
     val arAnchorPlaced: Boolean = true,

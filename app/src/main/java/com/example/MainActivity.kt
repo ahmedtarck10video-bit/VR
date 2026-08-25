@@ -104,11 +104,19 @@ fun SpatialMainScreen(
         // -------------------------------------------------------------
         when (uiState.currentMode) {
             SpatialMode.OBJECT -> {
-                // Pure black canvas for 3D Object inspection
+                // Google 3D Scene Studio Canvas
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(0xFFFFFFFF),
+                                    Color(0xFFF6F8FA),
+                                    Color(0xFFECEFF1)
+                                )
+                            )
+                        )
                         .pointerInput(Unit) {
                             detectTransformGestures { _, pan, zoom, rotation ->
                                 if (pan.x != 0f || pan.y != 0f) {
@@ -140,6 +148,44 @@ fun SpatialMainScreen(
                                 drawFloorGrid = false
                             )
                         }
+
+                        // Top Action Icons (Close X & More Options)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .windowInsetsPadding(WindowInsets.statusBars)
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = { viewModel.clearAll() },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x15000000))
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = Color(0xFF3C4043)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { viewModel.toggleWireframe() },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x15000000))
+                            ) {
+                                Icon(
+                                    if (uiState.isWireframe) Icons.Default.ViewInAr else Icons.Default.GridOn,
+                                    contentDescription = "Toggle Wireframe",
+                                    tint = Color(0xFF3C4043)
+                                )
+                            }
+                        }
                     } else {
                         // Empty State Prompt
                         Box(
@@ -148,28 +194,36 @@ fun SpatialMainScreen(
                         ) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
                                 modifier = Modifier
                                     .padding(32.dp)
                                     .clickable { filePickerLauncher.launch("*/*") }
                             ) {
-                                Icon(
-                                    Icons.Default.FileOpen,
-                                    contentDescription = null,
-                                    tint = Color.White.copy(alpha = 0.6f),
-                                    modifier = Modifier.size(56.dp)
-                                )
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFFE8F0FE),
+                                    modifier = Modifier.size(80.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.FileOpen,
+                                            contentDescription = null,
+                                            tint = Color(0xFF1A73E8),
+                                            modifier = Modifier.size(38.dp)
+                                        )
+                                    }
+                                }
                                 Text(
-                                    text = "Tap 'Open' below to select a 3D model",
-                                    color = Color.White.copy(alpha = 0.8f),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium,
+                                    text = "Tap to open a 3D Model",
+                                    color = Color(0xFF202124),
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                     textAlign = TextAlign.Center
                                 )
                                 Text(
-                                    text = "Supports USDZ, GLB, GLTF, OBJ & STL files",
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    fontSize = 12.sp
+                                    text = "Supports GLB, GLTF, USDZ, OBJ & STL formats",
+                                    color = Color(0xFF5F6368),
+                                    fontSize = 13.sp
                                 )
                             }
                         }
@@ -404,15 +458,52 @@ fun SpatialMainScreen(
         }
 
         // -------------------------------------------------------------
-        // BOTTOM PILL BAR: [ PHOTO | (● REC) | Open | Clear ]
+        // BOTTOM ACTION AREA: "View in your space" + Action Pills
         // -------------------------------------------------------------
-        Box(
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(bottom = 20.dp),
-            contentAlignment = Alignment.Center
+                .padding(bottom = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Google Scene Viewer "View in your space" button
+            if (currentModel != null) {
+                Surface(
+                    shape = RoundedCornerShape(32.dp),
+                    color = Color.White,
+                    shadowElevation = 8.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDADCE0)),
+                    modifier = Modifier
+                        .height(48.dp)
+                        .clickable {
+                            launchGoogleSceneViewer(context, currentModel)
+                            viewModel.setMode(SpatialMode.AR)
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CropFree,
+                            contentDescription = "View in your space",
+                            tint = Color(0xFF1A73E8),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = "View in your space",
+                            color = Color(0xFF1A73E8),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            // Controls Pill [ PHOTO | REC | Open | Clear ]
             AppleLiquidBottomControls(
                 isRecording = uiState.isRecording,
                 onPhotoClick = { viewModel.triggerPhotoCapture() },
@@ -662,3 +753,37 @@ fun AppleLiquidBottomControls(
         }
     }
 }
+
+fun launchGoogleSceneViewer(context: android.content.Context, model: com.example.math3d.Model3D) {
+    val fileUri = model.fileUri
+    if (fileUri != null) {
+        try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            val sceneViewerUri = android.net.Uri.parse("https://arvr.google.com/scene-viewer/1.0").buildUpon()
+                .appendQueryParameter("file", fileUri.toString())
+                .appendQueryParameter("mode", "ar_preferred")
+                .appendQueryParameter("title", model.name)
+                .appendQueryParameter("resizable", "true")
+                .build()
+            intent.data = sceneViewerUri
+            intent.setPackage("com.google.android.googlequicksearchbox")
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                val fallbackIntent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                val sceneViewerUri = android.net.Uri.parse("https://arvr.google.com/scene-viewer/1.0").buildUpon()
+                    .appendQueryParameter("file", fileUri.toString())
+                    .appendQueryParameter("mode", "ar_preferred")
+                    .appendQueryParameter("title", model.name)
+                    .build()
+                fallbackIntent.data = sceneViewerUri
+                fallbackIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(fallbackIntent)
+            } catch (e2: Exception) {
+                // Fallback handled in-app
+            }
+        }
+    }
+}
+

@@ -28,7 +28,8 @@ object ModelFileLoader {
                     Model3D(
                         name = displayName,
                         description = "${normalized.size} polygons loaded (${getFileFormatLabel(rawName)})",
-                        triangles = normalized
+                        triangles = normalized,
+                        fileUri = uri
                     )
                 } else {
                     null
@@ -222,6 +223,8 @@ object ModelFileLoader {
                 }
             }
 
+            val materials = root.optJSONArray("materials")
+
             for (m in 0 until meshes.length()) {
                 val mesh = meshes.getJSONObject(m)
                 val primitives = mesh.optJSONArray("primitives") ?: continue
@@ -230,6 +233,27 @@ object ModelFileLoader {
                     val prim = primitives.getJSONObject(p)
                     val attributes = prim.optJSONObject("attributes") ?: continue
                     if (!attributes.has("POSITION")) continue
+
+                    // Parse Material Color if available
+                    var primColor = 0L
+                    if (prim.has("material") && materials != null) {
+                        val matIdx = prim.getInt("material")
+                        if (matIdx in 0 until materials.length()) {
+                            val matObj = materials.optJSONObject(matIdx)
+                            val pbr = matObj?.optJSONObject("pbrMetallicRoughness")
+                            if (pbr != null && pbr.has("baseColorFactor")) {
+                                val bcf = pbr.getJSONArray("baseColorFactor")
+                                val r = (bcf.optDouble(0, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                val g = (bcf.optDouble(1, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                val b = (bcf.optDouble(2, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                val a = (bcf.optDouble(3, 1.0) * 255.0).toInt().coerceIn(0, 255)
+                                primColor = ((a.toLong() and 0xFF) shl 24) or
+                                        ((r.toLong() and 0xFF) shl 16) or
+                                        ((g.toLong() and 0xFF) shl 8) or
+                                        (b.toLong() and 0xFF)
+                            }
+                        }
+                    }
 
                     val posAccessorIdx = attributes.getInt("POSITION")
                     val posAccessor = accessors.getJSONObject(posAccessorIdx)
@@ -298,7 +322,7 @@ object ModelFileLoader {
                                 val v2 = vertices[i1]
                                 val v3 = vertices[i2]
                                 val norm = (v2 - v1).cross(v3 - v1).normalize()
-                                triangles.add(Triangle(v1, v2, v3, norm))
+                                triangles.add(Triangle(v1, v2, v3, norm, color = primColor))
                             }
                         }
                     } else {
@@ -308,7 +332,7 @@ object ModelFileLoader {
                             val v2 = vertices[i + 1]
                             val v3 = vertices[i + 2]
                             val norm = (v2 - v1).cross(v3 - v1).normalize()
-                            triangles.add(Triangle(v1, v2, v3, norm))
+                            triangles.add(Triangle(v1, v2, v3, norm, color = primColor))
                         }
                     }
                 }
