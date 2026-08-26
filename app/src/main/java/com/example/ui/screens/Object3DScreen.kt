@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.engine.Renderer3D
 import com.example.ui.components.GlassCard
+import com.example.ui.components.Sceneview3DViewport
 import com.example.ui.theme.NeonCyan
 import com.example.viewmodel.MRUiState
 import com.example.viewmodel.MixedRealityViewModel
@@ -80,36 +81,68 @@ fun Object3DScreen(
                 )
             )
     ) {
-        // 3D Canvas
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, rotation ->
-                        viewModel.updateRotation(
-                            deltaX = -pan.y * 0.008f,
-                            deltaY = pan.x * 0.008f
-                        )
-                        viewModel.updateScale(zoom)
-                    }
-                }
-        ) {
-            renderer.render(
-                drawScope = this,
+        if (currentModel.localFilePath != null || currentModel.fileUri != null) {
+            // Hardware-Accelerated 3D PBR Engine (Sceneview + Filament)
+            Sceneview3DViewport(
                 model = currentModel,
                 rotX = uiState.rotX,
-                rotY = uiState.rotY + if (uiState.isAutoSpin) spinAngle else 0f,
+                rotY = uiState.rotY,
                 rotZ = 0f,
                 scale = uiState.scale,
                 panX = uiState.panX,
                 panY = uiState.panY,
-                wireframe = uiState.isWireframe,
-                primaryColor = uiState.modelColor,
-                drawShadow = true,
-                drawFloorGrid = false,
-                hdriPreset = uiState.hdriPreset,
-                engineProfile = uiState.renderEngineProfile
+                isAutoSpin = uiState.isAutoSpin,
+                autoSpinAngle = spinAngle,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, rotation ->
+                            viewModel.updateRotation(
+                                deltaX = -pan.y * 0.008f,
+                                deltaY = pan.x * 0.008f
+                            )
+                            viewModel.updateScale(zoom)
+                            if (pan.x != 0f || pan.y != 0f) {
+                                viewModel.updatePan(pan.x, pan.y)
+                            }
+                        }
+                    }
             )
+        } else {
+            // Procedural Solid Mesh Renderer
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, rotation ->
+                            viewModel.updateRotation(
+                                deltaX = -pan.y * 0.008f,
+                                deltaY = pan.x * 0.008f
+                            )
+                            viewModel.updateScale(zoom)
+                            if (pan.x != 0f || pan.y != 0f) {
+                                viewModel.updatePan(pan.x, pan.y)
+                            }
+                        }
+                    }
+            ) {
+                renderer.render(
+                    drawScope = this,
+                    model = currentModel,
+                    rotX = uiState.rotX,
+                    rotY = uiState.rotY + if (uiState.isAutoSpin) spinAngle else 0f,
+                    rotZ = 0f,
+                    scale = uiState.scale,
+                    panX = uiState.panX,
+                    panY = uiState.panY,
+                    wireframe = uiState.isWireframe,
+                    primaryColor = uiState.modelColor,
+                    drawShadow = true,
+                    drawFloorGrid = false,
+                    hdriPreset = uiState.hdriPreset,
+                    engineProfile = uiState.renderEngineProfile
+                )
+            }
         }
 
         // Top Model Info Glass Card

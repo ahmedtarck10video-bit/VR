@@ -63,5 +63,7 @@ data class Model3D(
     val name: String,
     val description: String,
     val triangles: List<Triangle>,
-    val fileUri: android.net.Uri? = null
+    val fileUri: android.net.Uri? = null,
+    val localFilePath: String? = null,
+    val isGlbOrGltf: Boolean = false
 )

@@ -32,18 +32,45 @@ object ModelFileLoader {
     fun loadModelFromUri(context: Context, uri: Uri): Model3D? {
         val rawName = getFileName(context, uri) ?: "Imported 3D Model"
         val displayName = formatCleanName(rawName)
+        val isGlbOrGltf = rawName.lowercase().endsWith(".glb") || rawName.lowercase().endsWith(".gltf")
+
+        var cachedFile: java.io.File? = null
+        try {
+            // Cache file for direct Filament / Sceneview GPU pipeline loading
+            val safeName = "imported_${System.currentTimeMillis()}_${rawName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")}"
+            val destFile = java.io.File(context.cacheDir, safeName)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            if (destFile.exists() && destFile.length() > 0) {
+                cachedFile = destFile
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         return try {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+            val inputStream = if (cachedFile != null && cachedFile.exists()) {
+                cachedFile.inputStream()
+            } else {
+                context.contentResolver.openInputStream(uri) ?: return null
+            }
             val bufferedStream = BufferedInputStream(inputStream, BUFFER_SIZE)
 
             val triangles = parseStream(bufferedStream, rawName)
-            if (triangles.isNotEmpty()) {
-                val normalized = normalizeAndCenterMesh(triangles)
+            val normalized = if (triangles.isNotEmpty()) normalizeAndCenterMesh(triangles) else emptyList()
+
+            // If it's a GLB/GLTF model or we parsed triangles, create Model3D
+            if (triangles.isNotEmpty() || isGlbOrGltf || (cachedFile != null && cachedFile.exists())) {
                 Model3D(
                     name = displayName,
-                    description = "${normalized.size} polygons loaded (${getFileFormatLabel(rawName)})",
+                    description = if (triangles.isNotEmpty()) "${normalized.size} polygons loaded (${getFileFormatLabel(rawName)})" else "Hardware Accelerated 3D Model (${getFileFormatLabel(rawName)})",
                     triangles = normalized,
-                    fileUri = uri
+                    fileUri = uri,
+                    localFilePath = cachedFile?.absolutePath,
+                    isGlbOrGltf = isGlbOrGltf
                 )
             } else {
                 null
