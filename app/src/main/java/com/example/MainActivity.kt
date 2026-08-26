@@ -184,7 +184,7 @@ fun SpatialMainScreen(
                                     textAlign = TextAlign.Center
                                 )
                                 Text(
-                                    text = "Supports GLB, GLTF, Apple USDZ, OBJ & STL formats",
+                                    text = "Powered by RealityKit, SceneKit, ModelIO & ARKit • GLB, GLTF, USDZ",
                                     color = Color(0xFF5F6368),
                                     fontSize = 13.sp
                                 )

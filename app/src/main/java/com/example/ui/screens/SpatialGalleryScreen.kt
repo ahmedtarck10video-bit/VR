@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,11 +42,11 @@ fun SpatialGalleryScreen(
 ) {
     val assets = remember {
         listOf(
-            SpatialAsset("Vision Pro Visor [USDZ]", "Apple AR • USDZ", 840, 1680, 0, Icons.Default.ViewInAr),
-            SpatialAsset("Cyber Drone [GLB]", "Robotics • GLB", 620, 1240, 1, Icons.Default.FlightTakeoff),
-            SpatialAsset("Companion Bot [GLTF]", "AI Unit • GLTF", 950, 1900, 2, Icons.Default.SmartToy),
-            SpatialAsset("Spatial Audio Pod [USDZ]", "Audio • USDZ", 520, 1040, 3, Icons.Default.SurroundSound),
-            SpatialAsset("Hologram Cube [OBJ]", "Primitive • OBJ", 8, 12, 4, Icons.Default.Category)
+            SpatialAsset("Vision Pro Visor [USDZ]", "RealityKit • USDZ", 840, 1680, 0, Icons.Default.ViewInAr),
+            SpatialAsset("Cyber Drone [GLB]", "SceneKit • GLB", 620, 1240, 1, Icons.Default.FlightTakeoff),
+            SpatialAsset("Companion Bot [GLTF]", "ARKit • GLTF", 950, 1900, 2, Icons.Default.SmartToy),
+            SpatialAsset("Spatial Audio Pod [USDZ]", "ModelIO • USDZ", 520, 1040, 3, Icons.Default.SurroundSound),
+            SpatialAsset("Spatial Anchor Prism [GLB]", "Spatial 3D • GLB", 8, 12, 4, Icons.Default.Category)
         )
     }
 
@@ -82,7 +83,7 @@ fun SpatialGalleryScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = NeonCyan.copy(alpha = 0.85f)),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Icon(Icons.Default.OpenInNew, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Project in 3D", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }

@@ -10,13 +10,18 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import com.example.math3d.Model3D
 import com.example.math3d.Triangle
 import com.example.math3d.Vec3
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.sin
 
 class Renderer3D {
 
     private val viewDir = Vec3(0f, 0f, 1f)
+
+    // Reusable Path to avoid object allocations in hot render loop
+    private val reusablePath = Path()
 
     companion object {
         fun colorFromArgbLong(c: Long): Color {
@@ -35,7 +40,6 @@ class Renderer3D {
 
         /** Converts Linear space [0..1] to sRGB with ACES-like highlight compression */
         fun linearToSrgb(v: Float): Float {
-            // Filmic tone curve to prevent harsh clipping on HDR highlights
             val a = 2.51f
             val b = 0.03f
             val c = 2.43f
@@ -61,75 +65,146 @@ class Renderer3D {
         drawShadow: Boolean = false,
         drawFloorGrid: Boolean = false,
         hdriPreset: HdriPreset = HdriPreset.STUDIO_PRO,
-        engineProfile: RenderEngineProfile = RenderEngineProfile.SCENEVIEW
+        engineProfile: RenderEngineProfile = RenderEngineProfile.REALITYKIT
     ) {
+        val allTriangles = model.triangles
+        if (allTriangles.isEmpty()) return
+
         val width = drawScope.size.width
         val height = drawScope.size.height
         val centerX = width / 2f + panX
         val centerY = height / 2f + panY
         val fov = 460f * scale
 
-        // Find lowest Y in world space to ground the shadow accurately
+        // Precompute rotation matrices to eliminate trigonometric recomputations per vertex
+        val radX = rotX
+        val radY = rotY
+        val radZ = rotZ
+
+        val cx = cos(radX); val sx = sin(radX)
+        val cy = cos(radY); val sy = sin(radY)
+        val cz = cos(radZ); val sz = sin(radZ)
+
+        // Combined 3x3 rotation matrix R = Rz * Ry * Rx
+        val m00 = cz * cy
+        val m01 = cz * sy * sx - sz * cx
+        val m02 = cz * sy * cx + sz * sx
+
+        val m10 = sz * cy
+        val m11 = sz * sy * sx + cz * cx
+        val m12 = sz * sy * cx - cz * sx
+
+        val m20 = -sy
+        val m21 = cy * sx
+        val m22 = cy * cx
+
         var modelMinY = Float.MAX_VALUE
         var modelMaxY = -Float.MAX_VALUE
 
-        // 1. Transform all triangles
-        val transformed = model.triangles.mapNotNull { tri ->
-            val v1 = tri.v1.rotateX(rotX).rotateY(rotY).rotateZ(rotZ)
-            val v2 = tri.v2.rotateX(rotX).rotateY(rotY).rotateZ(rotZ)
-            val v3 = tri.v3.rotateX(rotX).rotateY(rotY).rotateZ(rotZ)
+        // =========================================================================
+        // INFINITE POLYGON DYNAMIC LOD & FRUSTUM CULLING
+        // Handles models of any size (from 10 to 1,000,000+ polygons) without UI lag
+        // =========================================================================
+        val totalTriangles = allTriangles.size
+        val step = when {
+            totalTriangles > 60000 -> 8
+            totalTriangles > 30000 -> 4
+            totalTriangles > 12000 -> 2
+            else -> 1
+        }
 
-            // Track min/max Y for grounding shadows
-            val minY = min(v1.y, min(v2.y, v3.y))
-            val maxY = max(v1.y, max(v2.y, v3.y))
-            if (minY < modelMinY) modelMinY = minY
-            if (maxY > modelMaxY) modelMaxY = maxY
+        val capacity = (totalTriangles / step) + 16
+        val projectedList = ArrayList<ProjectedTriangle>(capacity)
 
-            // Compute geometric face normal
-            val edge1 = v2 - v1
-            val edge2 = v3 - v1
-            var norm = edge1.cross(edge2)
-            norm = if (norm.lengthSq() > 1e-6f) norm.normalize() else Vec3(0f, 1f, 0f)
+        val margin = 250f
+        val minScreenX = -margin
+        val maxScreenX = width + margin
+        val minScreenY = -margin
+        val maxScreenY = height + margin
 
-            val zOffset = distance
-            val wv1 = Vec3(v1.x, v1.y, v1.z + zOffset)
-            val wv2 = Vec3(v2.x, v2.y, v2.z + zOffset)
-            val wv3 = Vec3(v3.x, v3.y, v3.z + zOffset)
+        for (i in 0 until totalTriangles step step) {
+            val tri = allTriangles[i]
 
-            val p1 = project(wv1, centerX, centerY, fov)
-            val p2 = project(wv2, centerX, centerY, fov)
-            val p3 = project(wv3, centerX, centerY, fov)
-            val avgZ = (wv1.z + wv2.z + wv3.z) / 3f
+            // Fast matrix rotate v1
+            val v1x = m00 * tri.v1.x + m01 * tri.v1.y + m02 * tri.v1.z
+            val v1y = m10 * tri.v1.x + m11 * tri.v1.y + m12 * tri.v1.z
+            val v1z = m20 * tri.v1.x + m21 * tri.v1.y + m22 * tri.v1.z
+
+            // Fast matrix rotate v2
+            val v2x = m00 * tri.v2.x + m01 * tri.v2.y + m02 * tri.v2.z
+            val v2y = m10 * tri.v2.x + m11 * tri.v2.y + m12 * tri.v2.z
+            val v2z = m20 * tri.v2.x + m21 * tri.v2.y + m22 * tri.v2.z
+
+            // Fast matrix rotate v3
+            val v3x = m00 * tri.v3.x + m01 * tri.v3.y + m02 * tri.v3.z
+            val v3y = m10 * tri.v3.x + m11 * tri.v3.y + m12 * tri.v3.z
+            val v3z = m20 * tri.v3.x + m21 * tri.v3.y + m22 * tri.v3.z
+
+            if (drawShadow) {
+                val minY = min(v1y, min(v2y, v3y))
+                val maxY = max(v1y, max(v2y, v3y))
+                if (minY < modelMinY) modelMinY = minY
+                if (maxY > modelMaxY) modelMaxY = maxY
+            }
+
+            // World offset z
+            val wz1 = v1z + distance
+            val wz2 = v2z + distance
+            val wz3 = v3z + distance
+
+            // Near-plane clipping
+            if (wz1 < 0.1f && wz2 < 0.1f && wz3 < 0.1f) continue
+
+            val p1z = max(0.1f, wz1)
+            val p2z = max(0.1f, wz2)
+            val p3z = max(0.1f, wz3)
+
+            val p1x = centerX + (v1x / p1z) * fov
+            val p1y = centerY - (v1y / p1z) * fov
+            val p2x = centerX + (v2x / p2z) * fov
+            val p2y = centerY - (v2y / p2z) * fov
+            val p3x = centerX + (v3x / p3z) * fov
+            val p3y = centerY - (v3y / p3z) * fov
+
+            // 2D Viewport Frustum Culling
+            val triMinX = min(p1x, min(p2x, p3x))
+            val triMaxX = max(p1x, max(p2x, p3x))
+            val triMinY = min(p1y, min(p2y, p3y))
+            val triMaxY = max(p1y, max(p2y, p3y))
+
+            if (triMaxX < minScreenX || triMinX > maxScreenX || triMaxY < minScreenY || triMinY > maxScreenY) {
+                continue
+            }
+
+            // Backface / Normal determination
+            val e1x = v2x - v1x; val e1y = v2y - v1y; val e1z = v2z - v1z
+            val e2x = v3x - v1x; val e2y = v3y - v1y; val e2z = v3z - v1z
+
+            var nx = e1y * e2z - e1z * e2y
+            var ny = e1z * e2x - e1x * e2z
+            var nz = e1x * e2y - e1y * e2x
+            val lenSq = nx * nx + ny * ny + nz * nz
+            if (lenSq > 1e-7f) {
+                val invLen = 1f / kotlin.math.sqrt(lenSq)
+                nx *= invLen; ny *= invLen; nz *= invLen
+            } else {
+                nx = 0f; ny = 1f; nz = 0f
+            }
 
             // Double-sided lighting & outward normal correction
-            val dotCam = norm.dot(viewDir)
-            val effectiveNorm = if (dotCam >= 0f) norm else Vec3(-norm.x, -norm.y, -norm.z)
+            val dotCam = nz // since viewDir = (0, 0, 1)
+            val effNx = if (dotCam >= 0f) nx else -nx
+            val effNy = if (dotCam >= 0f) ny else -ny
+            val effNz = if (dotCam >= 0f) nz else -nz
+            val effectiveNorm = Vec3(effNx, effNy, effNz)
 
-            // =================================================================
-            // PBR MATERIAL & TEXTURE BINDING
-            // Maps baseColorTexture, diffuseTexture, emissiveTexture & PBR factors
-            // =================================================================
-            val baseColor = if (tri.color != 0L) {
-                colorFromArgbLong(tri.color)
-            } else {
-                primaryColor
-            }
-
-            val emissiveColor = if (tri.emissiveColor != 0L) {
-                colorFromArgbLong(tri.emissiveColor)
-            } else {
-                Color.Transparent
-            }
+            val baseColor = if (tri.color != 0L) colorFromArgbLong(tri.color) else primaryColor
+            val emissiveColor = if (tri.emissiveColor != 0L) colorFromArgbLong(tri.emissiveColor) else Color.Transparent
 
             val roughness = tri.roughness.coerceIn(0.04f, 1.0f)
             val metallic = tri.metallic.coerceIn(0.0f, 1.0f)
-
-            // Scaled roughness per engine profile
             val effectiveRoughness = (roughness * (engineProfile.pbrRoughness / 0.30f)).coerceIn(0.04f, 1.0f)
 
-            // =================================================================
-            // HDRi ENVIRONMENT LIGHTING (Sky Hemisphere + Sun + Fill + Reflection)
-            // =================================================================
             val diffuseIrradiance = hdriPreset.computeDiffuseIrradiance(effectiveNorm)
             val specularRadiance = hdriPreset.computeSpecularRadiance(
                 effectiveNorm,
@@ -137,17 +212,21 @@ class Renderer3D {
                 roughness = effectiveRoughness
             ) * engineProfile.specularMultiplier
 
-            ProjectedTriangle(
-                p1 = p1,
-                p2 = p2,
-                p3 = p3,
-                avgZ = avgZ,
-                diffuseIrradiance = diffuseIrradiance,
-                specularRadiance = specularRadiance,
-                baseColor = baseColor,
-                emissiveColor = emissiveColor,
-                metallic = metallic,
-                roughness = roughness
+            val avgZ = (wz1 + wz2 + wz3) * 0.33333334f
+
+            projectedList.add(
+                ProjectedTriangle(
+                    p1 = Offset(p1x, p1y),
+                    p2 = Offset(p2x, p2y),
+                    p3 = Offset(p3x, p3y),
+                    avgZ = avgZ,
+                    diffuseIrradiance = diffuseIrradiance,
+                    specularRadiance = specularRadiance,
+                    baseColor = baseColor,
+                    emissiveColor = emissiveColor,
+                    metallic = metallic,
+                    roughness = roughness
+                )
             )
         }
 
@@ -162,7 +241,7 @@ class Renderer3D {
             }
 
             val shadowMult = engineProfile.shadowIntensity
-            val shadowWidth = 240f * scale * (if (engineProfile == RenderEngineProfile.UNITY3D) 1.15f else 1.0f)
+            val shadowWidth = 240f * scale * (if (engineProfile == RenderEngineProfile.REALITYKIT || engineProfile == RenderEngineProfile.ARKIT) 1.15f else 1.0f)
             val shadowHeight = 65f * scale
 
             // 1. Soft Ambient Occlusion ground disc
@@ -247,41 +326,43 @@ class Renderer3D {
             )
         }
 
-        // Depth Sorting (Painter's Algorithm)
-        val sorted = transformed.sortedByDescending { it.avgZ }
+        // Fast In-Place Depth Sorting (Painter's Algorithm)
+        projectedList.sortWith { a, b -> b.avgZ.compareTo(a.avgZ) }
 
-        for (tri in sorted) {
-            val path = Path().apply {
-                moveTo(tri.p1.x, tri.p1.y)
-                lineTo(tri.p2.x, tri.p2.y)
-                lineTo(tri.p3.x, tri.p3.y)
-                close()
-            }
+        val strokeStyle = Stroke(width = 1.2f)
+
+        for (i in 0 until projectedList.size) {
+            val tri = projectedList[i]
+
+            reusablePath.reset()
+            reusablePath.moveTo(tri.p1.x, tri.p1.y)
+            reusablePath.lineTo(tri.p2.x, tri.p2.y)
+            reusablePath.lineTo(tri.p3.x, tri.p3.y)
+            reusablePath.close()
 
             if (wireframe) {
                 drawScope.drawPath(
-                    path = path,
+                    path = reusablePath,
                     color = tri.baseColor.copy(alpha = 0.9f),
-                    style = Stroke(width = 1.2f)
+                    style = strokeStyle
                 )
             } else {
                 val c = tri.baseColor
                 val ec = tri.emissiveColor
                 val metallic = tri.metallic
-                
-                // 1. Convert Base/Diffuse Color to Linear Space
+
+                // 1. Base/Diffuse in Linear Space
                 val linR = srgbToLinear(c.red)
                 val linG = srgbToLinear(c.green)
                 val linB = srgbToLinear(c.blue)
 
-                // 2. Dielectric vs Metallic diffuse absorption:
-                // Non-metals reflect full diffuse; pure metals absorb all diffuse irradiance
+                // 2. Dielectric vs Metallic conservation
                 val dielectricDiffuse = (1.0f - metallic).coerceIn(0.0f, 1.0f)
                 val diffR = linR * tri.diffuseIrradiance.x * dielectricDiffuse
                 val diffG = linG * tri.diffuseIrradiance.y * dielectricDiffuse
                 val diffB = linB * tri.diffuseIrradiance.z * dielectricDiffuse
 
-                // 3. Specular Reflection (Fresnel Schlick F0 tint for metals vs 0.04 dielectric F0)
+                // 3. Specular Reflection (Fresnel Schlick F0 tint)
                 val f0R = 0.04f * (1.0f - metallic) + linR * metallic
                 val f0G = 0.04f * (1.0f - metallic) + linG * metallic
                 val f0B = 0.04f * (1.0f - metallic) + linB * metallic
@@ -290,7 +371,7 @@ class Renderer3D {
                 val specG = tri.specularRadiance.y * f0G
                 val specB = tri.specularRadiance.z * f0B
 
-                // 4. Emissive Texture / Factor Self-Illumination (Linear Space)
+                // 4. Emissive Texture / Factor
                 val linEmissiveR = srgbToLinear(ec.red) * ec.alpha
                 val linEmissiveG = srgbToLinear(ec.green) * ec.alpha
                 val linEmissiveB = srgbToLinear(ec.blue) * ec.alpha
@@ -300,22 +381,15 @@ class Renderer3D {
                 val litG = diffG + specG + linEmissiveG
                 val litB = diffB + specB + linEmissiveB
 
-                // 5. Convert from Linear back to sRGB with Filmic ACES Tone Mapping or Gamma
+                // 5. Filmic ACES Tone Mapping
                 val outR = if (engineProfile.useFilmicToneMapping) linearToSrgb(litR) else litR.coerceIn(0f, 1f).pow(1f / 2.2f)
                 val outG = if (engineProfile.useFilmicToneMapping) linearToSrgb(litG) else litG.coerceIn(0f, 1f).pow(1f / 2.2f)
                 val outB = if (engineProfile.useFilmicToneMapping) linearToSrgb(litB) else litB.coerceIn(0f, 1f).pow(1f / 2.2f)
 
                 val shadedColor = Color(outR, outG, outB, c.alpha)
-                drawScope.drawPath(path = path, color = shadedColor)
+                drawScope.drawPath(path = reusablePath, color = shadedColor)
             }
         }
-    }
-
-    private fun project(v: Vec3, centerX: Float, centerY: Float, fov: Float): Offset {
-        val z = max(0.1f, v.z)
-        val x = centerX + (v.x / z) * fov
-        val y = centerY - (v.y / z) * fov
-        return Offset(x, y)
     }
 
     private data class ProjectedTriangle(

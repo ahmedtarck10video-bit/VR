@@ -102,7 +102,7 @@ data class MRUiState(
     val recordingSeconds: Int = 0,
     val showPhotoFlash: Boolean = false,
     val hdriPreset: HdriPreset = HdriPreset.STUDIO_PRO,
-    val renderEngineProfile: RenderEngineProfile = RenderEngineProfile.SCENEVIEW,
+    val renderEngineProfile: RenderEngineProfile = RenderEngineProfile.REALITYKIT,
     val isModelPickerOpen: Boolean = false,
     val isLoadingModel: Boolean = false,
     val notificationMessage: String? = null,

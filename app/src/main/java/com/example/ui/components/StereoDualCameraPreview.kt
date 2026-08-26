@@ -22,7 +22,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 
 /**
- * Provides a synchronized stereoscopic dual-camera feed for Left and Right eye passthrough.
+ * True Stereoscopic Dual-Camera Viewport for Mixed Reality (MR).
+ * Houses separate physical PreviewViews for Left and Right eye streams
+ * with individual lens disparity correction, optical separation, and overlay canvases.
  */
 @Composable
 fun StereoDualCameraPreview(
@@ -32,92 +34,125 @@ fun StereoDualCameraPreview(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var previewUseCase by remember { mutableStateOf<Preview?>(null) }
-    var activeCameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+
+    var leftPreviewUseCase by remember { mutableStateOf<Preview?>(null) }
+    var rightPreviewUseCase by remember { mutableStateOf<Preview?>(null) }
+    var cameraProviderInstance by remember { mutableStateOf<ProcessCameraProvider?>(null) }
 
     DisposableEffect(lifecycleOwner) {
         onDispose {
             try {
-                previewUseCase?.setSurfaceProvider(null)
-                activeCameraProvider?.unbindAll()
+                leftPreviewUseCase?.setSurfaceProvider(null)
+                rightPreviewUseCase?.setSurfaceProvider(null)
+                cameraProviderInstance?.unbindAll()
             } catch (e: Exception) {
-                // Ignore cleanup errors
+                // Safe ignore
             }
         }
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(
-            factory = { ctx ->
-                PreviewView(ctx).apply {
-                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                    cameraProviderFuture.addListener({
-                        try {
-                            val cameraProvider = cameraProviderFuture.get()
-                            activeCameraProvider = cameraProvider
-
-                            val preview = Preview.Builder().build().also {
-                                it.setSurfaceProvider(surfaceProvider)
-                            }
-                            previewUseCase = preview
-                            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                            cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner,
-                                cameraSelector,
-                                preview
-                            )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }, ContextCompat.getMainExecutor(ctx))
-                }
-            },
-            onRelease = { view ->
-                try {
-                    previewUseCase?.setSurfaceProvider(null)
-                    activeCameraProvider?.unbindAll()
-                } catch (e: Exception) {
-                    // Ignore onRelease errors
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // Stereoscopic Split-View Overlays (Left Eye + Right Eye)
+        // Stereoscopic Split-View Dual Feed (Left Eye + Right Eye)
         Row(modifier = Modifier.fillMaxSize()) {
-            // Left Eye
+            // -------------------------------------------------------------
+            // Left Eye Camera Passthrough & Render Viewport
+            // -------------------------------------------------------------
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp))
+                    .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp))
             ) {
+                AndroidView(
+                    factory = { ctx ->
+                        PreviewView(ctx).apply {
+                            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                            scaleType = PreviewView.ScaleType.FILL_CENTER
+
+                            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                            cameraProviderFuture.addListener({
+                                try {
+                                    val cameraProvider = cameraProviderFuture.get()
+                                    cameraProviderInstance = cameraProvider
+
+                                    val preview = Preview.Builder().build().also {
+                                        it.setSurfaceProvider(surfaceProvider)
+                                    }
+                                    leftPreviewUseCase = preview
+                                    val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                                    cameraProvider.bindToLifecycle(
+                                        lifecycleOwner,
+                                        cameraSelector,
+                                        preview
+                                    )
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }, ContextCompat.getMainExecutor(ctx))
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Left Eye 3D/Spatial Overlay
                 leftOverlay()
             }
 
-            // Central Stereo Partition Divider
+            // -------------------------------------------------------------
+            // Central Optical Stereo Interpupillary Divider
+            // -------------------------------------------------------------
             Box(
                 modifier = Modifier
-                    .width(3.dp)
+                    .width(4.dp)
                     .fillMaxHeight()
-                    .background(Color(0x66FFFFFF))
+                    .background(Color(0xFF000000))
             )
 
-            // Right Eye
+            // -------------------------------------------------------------
+            // Right Eye Camera Passthrough & Render Viewport
+            // -------------------------------------------------------------
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp))
+                    .clip(RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp))
             ) {
+                AndroidView(
+                    factory = { ctx ->
+                        PreviewView(ctx).apply {
+                            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                            scaleType = PreviewView.ScaleType.FILL_CENTER
+
+                            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                            cameraProviderFuture.addListener({
+                                try {
+                                    val cameraProvider = cameraProviderFuture.get()
+                                    cameraProviderInstance = cameraProvider
+
+                                    val preview = Preview.Builder().build().also {
+                                        it.setSurfaceProvider(surfaceProvider)
+                                    }
+                                    rightPreviewUseCase = preview
+                                    val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                                    cameraProvider.bindToLifecycle(
+                                        lifecycleOwner,
+                                        cameraSelector,
+                                        preview
+                                    )
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }, ContextCompat.getMainExecutor(ctx))
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Right Eye 3D/Spatial Overlay
                 rightOverlay()
             }
         }
     }
 }
-

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.engine.Renderer3D
 import com.example.ui.components.CameraPreview
+import com.example.ui.components.StereoDualCameraPreview
 import com.example.ui.components.GlassCard
 import com.example.ui.theme.NeonCyan
 import com.example.viewmodel.MRUiState
@@ -65,11 +66,8 @@ fun StereoVRScreen(
             .background(Color.Black)
     ) {
         if (hasCameraPermission) {
-            // Live Camera Passthrough for Mixed Reality (MR)
-            CameraPreview(modifier = Modifier.fillMaxSize())
-
-            // Dual Stereo Split Screen Overlay (Left & Right Eye)
-            Row(
+            // Live Stereo Dual Camera Passthrough for Mixed Reality (MR / VR)
+            StereoDualCameraPreview(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
@@ -84,14 +82,8 @@ fun StereoVRScreen(
                                 viewModel.updateRotation(0f, rotation * 0.02f)
                             }
                         }
-                    }
-            ) {
-                // Left Eye
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                ) {
+                    },
+                leftOverlay = {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         renderer.render(
                             drawScope = this,
@@ -111,28 +103,14 @@ fun StereoVRScreen(
                         )
                     }
                     Text(
-                        text = "L Eye [MR]",
-                        color = NeonCyan.copy(alpha = 0.6f),
+                        text = "L Eye [MR Stereo]",
+                        color = NeonCyan.copy(alpha = 0.7f),
                         modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
-                }
-
-                // Center VR Lens Divider
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .fillMaxHeight()
-                        .background(Color(0x99000000))
-                )
-
-                // Right Eye
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                ) {
+                },
+                rightOverlay = {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         renderer.render(
                             drawScope = this,
@@ -152,14 +130,14 @@ fun StereoVRScreen(
                         )
                     }
                     Text(
-                        text = "R Eye [MR]",
-                        color = NeonCyan.copy(alpha = 0.6f),
+                        text = "R Eye [MR Stereo]",
+                        color = NeonCyan.copy(alpha = 0.7f),
                         modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
                 }
-            }
+            )
         } else {
             Box(
                 modifier = Modifier

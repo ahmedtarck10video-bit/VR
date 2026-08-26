@@ -28,8 +28,8 @@ object MeshGenerator {
                 triangles = createAudioPod()
             ),
             Model3D(
-                name = "Hologram Cube [OBJ]",
-                description = "High-precision geometric spatial reference cube",
+                name = "Spatial Anchor Prism [GLB]",
+                description = "High-precision geometric spatial reference prism for ARKit anchoring",
                 triangles = createCube()
             )
         )
