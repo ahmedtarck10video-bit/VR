@@ -145,7 +145,8 @@ fun SpatialMainScreen(
                                 primaryColor = uiState.modelColor,
                                 drawShadow = false,
                                 drawFloorGrid = false,
-                                hdriPreset = uiState.hdriPreset
+                                hdriPreset = uiState.hdriPreset,
+                                engineProfile = uiState.renderEngineProfile
                             )
                         }
                     } else {
@@ -271,7 +272,8 @@ fun SpatialMainScreen(
                                     primaryColor = uiState.modelColor,
                                     drawShadow = true, // Grounded drop shadow on physical surface
                                     drawFloorGrid = false,
-                                    hdriPreset = uiState.hdriPreset
+                                    hdriPreset = uiState.hdriPreset,
+                                    engineProfile = uiState.renderEngineProfile
                                 )
                             }
                         }
@@ -518,7 +520,8 @@ fun SpatialMainScreen(
                                             primaryColor = uiState.modelColor,
                                             drawShadow = false,
                                             drawFloorGrid = false,
-                                            hdriPreset = uiState.hdriPreset
+                                            hdriPreset = uiState.hdriPreset,
+                                            engineProfile = uiState.renderEngineProfile
                                         )
                                     }
                                 }
@@ -539,7 +542,8 @@ fun SpatialMainScreen(
                                             primaryColor = uiState.modelColor,
                                             drawShadow = false,
                                             drawFloorGrid = false,
-                                            hdriPreset = uiState.hdriPreset
+                                            hdriPreset = uiState.hdriPreset,
+                                            engineProfile = uiState.renderEngineProfile
                                         )
                                     }
                                 }

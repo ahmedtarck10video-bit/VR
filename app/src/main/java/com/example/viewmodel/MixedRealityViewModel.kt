@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.engine.HdriPreset
+import com.example.engine.RenderEngineProfile
 import com.example.engine.SensorOrientation
 import com.example.engine.SensorTracker
 import com.example.engine.ar.ARCoreManager
@@ -101,6 +102,7 @@ data class MRUiState(
     val recordingSeconds: Int = 0,
     val showPhotoFlash: Boolean = false,
     val hdriPreset: HdriPreset = HdriPreset.STUDIO_PRO,
+    val renderEngineProfile: RenderEngineProfile = RenderEngineProfile.SCENEVIEW,
     val isModelPickerOpen: Boolean = false,
     val isLoadingModel: Boolean = false,
     val notificationMessage: String? = null,
@@ -421,6 +423,17 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         val presets = HdriPreset.values()
         val nextIndex = (presets.indexOf(_uiState.value.hdriPreset) + 1) % presets.size
         setHdriPreset(presets[nextIndex])
+    }
+
+    fun setRenderEngineProfile(profile: RenderEngineProfile) {
+        _uiState.value = _uiState.value.copy(renderEngineProfile = profile)
+        showNotification("Engine Profile: ${profile.title}")
+    }
+
+    fun cycleRenderEngineProfile() {
+        val profiles = RenderEngineProfile.values()
+        val nextIndex = (profiles.indexOf(_uiState.value.renderEngineProfile) + 1) % profiles.size
+        setRenderEngineProfile(profiles[nextIndex])
     }
 
     fun clearAll() {

@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.engine.RenderEngineProfile
 import com.example.ui.components.GlassCard
 import com.example.ui.theme.*
 import com.example.viewmodel.MixedRealityViewModel
@@ -201,6 +202,112 @@ fun SpatialSettingsScreen(
                             checkedTrackColor = NeonCyan
                         )
                     )
+                }
+            }
+        }
+
+        // 3D & AR Rendering Engines & Frameworks Section
+        GlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            backgroundColor = Color(0x261E293B)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Widgets, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("3D & AR Rendering Engines", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                    }
+
+                    Text(
+                        text = "Active: ${uiState.renderEngineProfile.shortName}",
+                        color = uiState.renderEngineProfile.themeColor,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Text(
+                    text = "Tap an engine profile below to switch GLB/glTF shading, PBR specular reflection, and AR shadow pipelines:",
+                    color = Color(0xAAFFFFFF),
+                    fontSize = 12.sp
+                )
+
+                RenderEngineProfile.values().forEach { profile ->
+                    val isSelected = uiState.renderEngineProfile == profile
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isSelected) profile.themeColor.copy(alpha = 0.15f) else Color(0x1AFFFFFF))
+                            .border(
+                                width = if (isSelected) 1.5f.dp else 1.dp,
+                                color = if (isSelected) profile.themeColor else Color(0x22FFFFFF),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clickable { viewModel.setRenderEngineProfile(profile) }
+                            .padding(12.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = profile.title,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    if (isSelected) {
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = "Active",
+                                            tint = profile.themeColor,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isSelected) profile.themeColor else profile.themeColor.copy(alpha = 0.2f))
+                                        .border(1.dp, profile.themeColor.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isSelected) "APPLIED" else "3D Engine",
+                                        color = if (isSelected) Color.Black else profile.themeColor,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            Text(
+                                text = profile.description,
+                                color = Color(0x99FFFFFF),
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -224,6 +224,7 @@ object ModelFileLoader {
             }
 
             val materials = root.optJSONArray("materials")
+            val gltfTextureManager = GltfTextureManager(root, buffersList)
 
             for (m in 0 until meshes.length()) {
                 val mesh = meshes.getJSONObject(m)
@@ -234,40 +235,16 @@ object ModelFileLoader {
                     val attributes = prim.optJSONObject("attributes") ?: continue
                     if (!attributes.has("POSITION")) continue
 
-                    // Parse Material Color if available
+                    // Parse Material Color & Texture if available
+                    var pbrMat = GltfPbrMaterial()
                     var primColor = 0L
                     if (prim.has("material") && materials != null) {
                         val matIdx = prim.getInt("material")
                         if (matIdx in 0 until materials.length()) {
-                            val matObj = materials.optJSONObject(matIdx)
-                            val pbr = matObj?.optJSONObject("pbrMetallicRoughness")
-                            if (pbr != null && pbr.has("baseColorFactor")) {
-                                val bcf = pbr.getJSONArray("baseColorFactor")
-                                val r = (bcf.optDouble(0, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                val g = (bcf.optDouble(1, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                val b = (bcf.optDouble(2, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                val a = (bcf.optDouble(3, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                primColor = ((a.toLong() and 0xFF) shl 24) or
-                                        ((r.toLong() and 0xFF) shl 16) or
-                                        ((g.toLong() and 0xFF) shl 8) or
-                                        (b.toLong() and 0xFF)
-                            }
-                            if (primColor == 0L && matObj?.has("emissiveFactor") == true) {
-                                val ef = matObj.getJSONArray("emissiveFactor")
-                                val r = (ef.optDouble(0, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                val g = (ef.optDouble(1, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                val b = (ef.optDouble(2, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                primColor = (0xFFL shl 24) or ((r.toLong() and 0xFF) shl 16) or ((g.toLong() and 0xFF) shl 8) or (b.toLong() and 0xFF)
-                            }
-                            val specGloss = matObj?.optJSONObject("extensions")?.optJSONObject("KHR_materials_pbrSpecularGlossiness")
-                            if (primColor == 0L && specGloss?.has("diffuseFactor") == true) {
-                                val df = specGloss.getJSONArray("diffuseFactor")
-                                val r = (df.optDouble(0, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                val g = (df.optDouble(1, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                val b = (df.optDouble(2, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                val a = (df.optDouble(3, 1.0) * 255.0).toInt().coerceIn(0, 255)
-                                primColor = ((a.toLong() and 0xFF) shl 24) or ((r.toLong() and 0xFF) shl 16) or ((g.toLong() and 0xFF) shl 8) or (b.toLong() and 0xFF)
-                            }
+                            pbrMat = gltfTextureManager.getPbrMaterial(matIdx)
+                            primColor = pbrMat.baseColorFactor
+                            if (primColor == 0L) primColor = pbrMat.diffuseFactor
+                            if (primColor == 0L) primColor = pbrMat.emissiveFactor
                         }
                     }
 
@@ -369,6 +346,56 @@ object ModelFileLoader {
                         }
                     }
 
+                    // Read TEXCOORD_0 if present for texture mapping
+                    val uvs = mutableListOf<Pair<Float, Float>>()
+                    if (attributes.has("TEXCOORD_0")) {
+                        try {
+                            val uvAccessorIdx = attributes.getInt("TEXCOORD_0")
+                            val uvAccessor = accessors.getJSONObject(uvAccessorIdx)
+                            val uvBufferViewIdx = uvAccessor.getInt("bufferView")
+                            val uvBufferView = bufferViews.getJSONObject(uvBufferViewIdx)
+                            val uvBufferIdx = uvBufferView.optInt("buffer", 0)
+                            val uvRawBuf = buffersList.getOrNull(uvBufferIdx) ?: rawBuffer
+                            val uvByteOffset = uvBufferView.optInt("byteOffset", 0) + uvAccessor.optInt("byteOffset", 0)
+                            val uvCount = uvAccessor.getInt("count")
+                            val uvComp = uvAccessor.optInt("componentType", 5126)
+                            val uvStride = uvBufferView.optInt("byteStride", 8)
+
+                            val uvBuf = ByteBuffer.wrap(uvRawBuf).order(ByteOrder.LITTLE_ENDIAN)
+                            uvBuf.position(uvByteOffset)
+
+                            for (u in 0 until uvCount) {
+                                val uCoord = if (uvComp == 5126) uvBuf.float else ((uvBuf.short.toInt() and 0xFFFF) / 65535f)
+                                val vCoord = if (uvComp == 5126) uvBuf.float else ((uvBuf.short.toInt() and 0xFFFF) / 65535f)
+                                uvs.add(Pair(uCoord, vCoord))
+
+                                val skip = uvStride - (if (uvComp == 5126) 8 else 4)
+                                if (skip > 0 && uvBuf.remaining() >= skip) {
+                                    uvBuf.position(uvBuf.position() + skip)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Ignore UV parse errors
+                        }
+                    }
+
+                    fun getSampledColor(idx: Int): Long {
+                        val fallback = getColorForIndex(idx)
+                        if (idx in uvs.indices) {
+                            val uv = uvs[idx]
+                            return pbrMat.sampleBaseOrDiffuseColor(uv.first, uv.second, fallback)
+                        }
+                        return if (fallback != 0L) fallback else pbrMat.sampleBaseOrDiffuseColor(0f, 0f, 0L)
+                    }
+
+                    fun getSampledEmissive(idx: Int): Long {
+                        if (idx in uvs.indices) {
+                            val uv = uvs[idx]
+                            return pbrMat.sampleEmissiveColor(uv.first, uv.second)
+                        }
+                        return pbrMat.emissiveFactor
+                    }
+
                     // Read indices if available
                     if (prim.has("indices")) {
                         val idxAccessorIdx = prim.getInt("indices")
@@ -407,8 +434,27 @@ object ModelFileLoader {
                                 val v2 = vertices[i1]
                                 val v3 = vertices[i2]
                                 val norm = (v2 - v1).cross(v3 - v1).normalize()
-                                val triCol = if (vertexColors.isNotEmpty()) getColorForIndex(i0) else primColor
-                                triangles.add(Triangle(v1, v2, v3, norm, color = triCol))
+                                val triCol = getSampledColor(i0)
+                                val triEmissive = getSampledEmissive(i0)
+                                val uv0 = uvs.getOrNull(i0) ?: Pair(0f, 0f)
+                                val uv1 = uvs.getOrNull(i1) ?: Pair(0f, 0f)
+                                val uv2 = uvs.getOrNull(i2) ?: Pair(0f, 0f)
+
+                                triangles.add(
+                                    Triangle(
+                                        v1 = v1,
+                                        v2 = v2,
+                                        v3 = v3,
+                                        normal = norm,
+                                        color = triCol,
+                                        emissiveColor = triEmissive,
+                                        metallic = pbrMat.metallic,
+                                        roughness = pbrMat.roughness,
+                                        u1 = uv0.first, v1Coord = uv0.second,
+                                        u2 = uv1.first, v2Coord = uv1.second,
+                                        u3 = uv2.first, v3Coord = uv2.second
+                                    )
+                                )
                             }
                         }
                     } else {
@@ -418,8 +464,27 @@ object ModelFileLoader {
                             val v2 = vertices[i + 1]
                             val v3 = vertices[i + 2]
                             val norm = (v2 - v1).cross(v3 - v1).normalize()
-                            val triCol = if (vertexColors.isNotEmpty()) getColorForIndex(i) else primColor
-                            triangles.add(Triangle(v1, v2, v3, norm, color = triCol))
+                            val triCol = getSampledColor(i)
+                            val triEmissive = getSampledEmissive(i)
+                            val uv0 = uvs.getOrNull(i) ?: Pair(0f, 0f)
+                            val uv1 = uvs.getOrNull(i + 1) ?: Pair(0f, 0f)
+                            val uv2 = uvs.getOrNull(i + 2) ?: Pair(0f, 0f)
+
+                            triangles.add(
+                                Triangle(
+                                    v1 = v1,
+                                    v2 = v2,
+                                    v3 = v3,
+                                    normal = norm,
+                                    color = triCol,
+                                    emissiveColor = triEmissive,
+                                    metallic = pbrMat.metallic,
+                                    roughness = pbrMat.roughness,
+                                    u1 = uv0.first, v1Coord = uv0.second,
+                                    u2 = uv1.first, v2Coord = uv1.second,
+                                    u3 = uv2.first, v3Coord = uv2.second
+                                )
+                            )
                         }
                     }
                 }

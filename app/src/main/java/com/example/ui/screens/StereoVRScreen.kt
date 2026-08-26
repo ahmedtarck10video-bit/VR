@@ -105,7 +105,9 @@ fun StereoVRScreen(
                             wireframe = uiState.isWireframe,
                             primaryColor = uiState.modelColor,
                             drawShadow = true,
-                            drawFloorGrid = true
+                            drawFloorGrid = true,
+                            hdriPreset = uiState.hdriPreset,
+                            engineProfile = uiState.renderEngineProfile
                         )
                     }
                     Text(
@@ -144,7 +146,9 @@ fun StereoVRScreen(
                             wireframe = uiState.isWireframe,
                             primaryColor = uiState.modelColor,
                             drawShadow = true,
-                            drawFloorGrid = true
+                            drawFloorGrid = true,
+                            hdriPreset = uiState.hdriPreset,
+                            engineProfile = uiState.renderEngineProfile
                         )
                     }
                     Text(

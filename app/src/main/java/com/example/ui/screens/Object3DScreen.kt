@@ -104,7 +104,11 @@ fun Object3DScreen(
                 panX = uiState.panX,
                 panY = uiState.panY,
                 wireframe = uiState.isWireframe,
-                primaryColor = uiState.modelColor
+                primaryColor = uiState.modelColor,
+                drawShadow = true,
+                drawFloorGrid = false,
+                hdriPreset = uiState.hdriPreset,
+                engineProfile = uiState.renderEngineProfile
             )
         }
 

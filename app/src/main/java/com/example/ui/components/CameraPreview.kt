@@ -7,9 +7,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -21,15 +19,14 @@ import androidx.core.content.ContextCompat
 fun CameraPreview(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+    var previewUseCase by remember { mutableStateOf<Preview?>(null) }
+    var activeCameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
 
     DisposableEffect(lifecycleOwner) {
         onDispose {
             try {
-                if (cameraProviderFuture.isDone) {
-                    val cameraProvider = cameraProviderFuture.get()
-                    cameraProvider.unbindAll()
-                }
+                previewUseCase?.setSurfaceProvider(null)
+                activeCameraProvider?.unbindAll()
             } catch (e: Exception) {
                 // Ignore cleanup errors
             }
@@ -39,16 +36,20 @@ fun CameraPreview(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { ctx ->
-                val previewView = PreviewView(ctx).apply {
+                PreviewView(ctx).apply {
                     implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                }
-                try {
+                    scaleType = PreviewView.ScaleType.FILL_CENTER
+
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                     cameraProviderFuture.addListener({
                         try {
                             val cameraProvider = cameraProviderFuture.get()
+                            activeCameraProvider = cameraProvider
+                            
                             val preview = Preview.Builder().build().also {
-                                it.setSurfaceProvider(previewView.surfaceProvider)
+                                it.setSurfaceProvider(surfaceProvider)
                             }
+                            previewUseCase = preview
                             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
                             cameraProvider.unbindAll()
@@ -61,16 +62,12 @@ fun CameraPreview(modifier: Modifier = Modifier) {
                             e.printStackTrace()
                         }
                     }, ContextCompat.getMainExecutor(ctx))
-                } catch (e: Exception) {
-                    e.printStackTrace()
                 }
-                previewView
             },
-            onRelease = {
+            onRelease = { view ->
                 try {
-                    if (cameraProviderFuture.isDone) {
-                        cameraProviderFuture.get().unbindAll()
-                    }
+                    previewUseCase?.setSurfaceProvider(null)
+                    activeCameraProvider?.unbindAll()
                 } catch (e: Exception) {
                     // Ignore onRelease errors
                 }
@@ -79,4 +76,5 @@ fun CameraPreview(modifier: Modifier = Modifier) {
         )
     }
 }
+
 

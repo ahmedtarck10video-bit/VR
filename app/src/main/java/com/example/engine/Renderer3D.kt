@@ -60,7 +60,8 @@ class Renderer3D {
         primaryColor: Color = Color(0xFFE2E8F0),
         drawShadow: Boolean = false,
         drawFloorGrid: Boolean = false,
-        hdriPreset: HdriPreset = HdriPreset.STUDIO_PRO
+        hdriPreset: HdriPreset = HdriPreset.STUDIO_PRO,
+        engineProfile: RenderEngineProfile = RenderEngineProfile.SCENEVIEW
     ) {
         val width = drawScope.size.width
         val height = drawScope.size.height
@@ -105,19 +106,49 @@ class Renderer3D {
             val effectiveNorm = if (dotCam >= 0f) norm else Vec3(-norm.x, -norm.y, -norm.z)
 
             // =================================================================
-            // HDRi ENVIRONMENT LIGHTING (Sky Hemisphere + Sun + Fill + Reflection)
+            // PBR MATERIAL & TEXTURE BINDING
+            // Maps baseColorTexture, diffuseTexture, emissiveTexture & PBR factors
             // =================================================================
-            val diffuseIrradiance = hdriPreset.computeDiffuseIrradiance(effectiveNorm)
-            val specularRadiance = hdriPreset.computeSpecularRadiance(effectiveNorm, viewDir, roughness = 0.32f)
-
-            // Base color resolution in Linear Space
             val baseColor = if (tri.color != 0L) {
                 colorFromArgbLong(tri.color)
             } else {
                 primaryColor
             }
 
-            ProjectedTriangle(p1, p2, p3, avgZ, diffuseIrradiance, specularRadiance, baseColor)
+            val emissiveColor = if (tri.emissiveColor != 0L) {
+                colorFromArgbLong(tri.emissiveColor)
+            } else {
+                Color.Transparent
+            }
+
+            val roughness = tri.roughness.coerceIn(0.04f, 1.0f)
+            val metallic = tri.metallic.coerceIn(0.0f, 1.0f)
+
+            // Scaled roughness per engine profile
+            val effectiveRoughness = (roughness * (engineProfile.pbrRoughness / 0.30f)).coerceIn(0.04f, 1.0f)
+
+            // =================================================================
+            // HDRi ENVIRONMENT LIGHTING (Sky Hemisphere + Sun + Fill + Reflection)
+            // =================================================================
+            val diffuseIrradiance = hdriPreset.computeDiffuseIrradiance(effectiveNorm)
+            val specularRadiance = hdriPreset.computeSpecularRadiance(
+                effectiveNorm,
+                viewDir,
+                roughness = effectiveRoughness
+            ) * engineProfile.specularMultiplier
+
+            ProjectedTriangle(
+                p1 = p1,
+                p2 = p2,
+                p3 = p3,
+                avgZ = avgZ,
+                diffuseIrradiance = diffuseIrradiance,
+                specularRadiance = specularRadiance,
+                baseColor = baseColor,
+                emissiveColor = emissiveColor,
+                metallic = metallic,
+                roughness = roughness
+            )
         }
 
         // =========================================================================
@@ -130,13 +161,18 @@ class Renderer3D {
                 centerY + 160f * scale
             }
 
-            val shadowWidth = 240f * scale
+            val shadowMult = engineProfile.shadowIntensity
+            val shadowWidth = 240f * scale * (if (engineProfile == RenderEngineProfile.UNITY3D) 1.15f else 1.0f)
             val shadowHeight = 65f * scale
 
             // 1. Soft Ambient Occlusion ground disc
             drawScope.drawOval(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color(0x35000000), Color(0x15000000), Color.Transparent),
+                    colors = listOf(
+                        Color(0, 0, 0, (0x35 * shadowMult).toInt().coerceIn(0, 255)),
+                        Color(0, 0, 0, (0x15 * shadowMult).toInt().coerceIn(0, 255)),
+                        Color.Transparent
+                    ),
                     center = Offset(centerX, groundYOffset),
                     radius = shadowWidth * 0.75f
                 ),
@@ -149,7 +185,11 @@ class Renderer3D {
             val lightCastOffsetY = 10f * scale
             drawScope.drawOval(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color(0x50000000), Color(0x20000000), Color.Transparent),
+                    colors = listOf(
+                        Color(0, 0, 0, (0x50 * shadowMult).toInt().coerceIn(0, 255)),
+                        Color(0, 0, 0, (0x20 * shadowMult).toInt().coerceIn(0, 255)),
+                        Color.Transparent
+                    ),
                     center = Offset(centerX + lightCastOffsetX, groundYOffset + lightCastOffsetY),
                     radius = shadowWidth * 0.5f
                 ),
@@ -162,7 +202,11 @@ class Renderer3D {
             val coreHeight = shadowHeight * 0.45f
             drawScope.drawOval(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color(0x80000000), Color(0x40000000), Color.Transparent),
+                    colors = listOf(
+                        Color(0, 0, 0, (0x80 * shadowMult).toInt().coerceIn(0, 255)),
+                        Color(0, 0, 0, (0x40 * shadowMult).toInt().coerceIn(0, 255)),
+                        Color.Transparent
+                    ),
                     center = Offset(centerX, groundYOffset),
                     radius = coreWidth * 0.5f
                 ),
@@ -222,20 +266,44 @@ class Renderer3D {
                 )
             } else {
                 val c = tri.baseColor
-                // Convert sRGB to Linear Space
+                val ec = tri.emissiveColor
+                val metallic = tri.metallic
+                
+                // 1. Convert Base/Diffuse Color to Linear Space
                 val linR = srgbToLinear(c.red)
                 val linG = srgbToLinear(c.green)
                 val linB = srgbToLinear(c.blue)
 
-                // Multiply Linear Base Color by Linear HDRi Irradiance + Specular Reflection
-                val litR = linR * tri.diffuseIrradiance.x + tri.specularRadiance.x
-                val litG = linG * tri.diffuseIrradiance.y + tri.specularRadiance.y
-                val litB = linB * tri.diffuseIrradiance.z + tri.specularRadiance.z
+                // 2. Dielectric vs Metallic diffuse absorption:
+                // Non-metals reflect full diffuse; pure metals absorb all diffuse irradiance
+                val dielectricDiffuse = (1.0f - metallic).coerceIn(0.0f, 1.0f)
+                val diffR = linR * tri.diffuseIrradiance.x * dielectricDiffuse
+                val diffG = linG * tri.diffuseIrradiance.y * dielectricDiffuse
+                val diffB = linB * tri.diffuseIrradiance.z * dielectricDiffuse
 
-                // Convert from Linear back to sRGB with Filmic Tone Mapping
-                val outR = linearToSrgb(litR)
-                val outG = linearToSrgb(litG)
-                val outB = linearToSrgb(litB)
+                // 3. Specular Reflection (Fresnel Schlick F0 tint for metals vs 0.04 dielectric F0)
+                val f0R = 0.04f * (1.0f - metallic) + linR * metallic
+                val f0G = 0.04f * (1.0f - metallic) + linG * metallic
+                val f0B = 0.04f * (1.0f - metallic) + linB * metallic
+
+                val specR = tri.specularRadiance.x * f0R
+                val specG = tri.specularRadiance.y * f0G
+                val specB = tri.specularRadiance.z * f0B
+
+                // 4. Emissive Texture / Factor Self-Illumination (Linear Space)
+                val linEmissiveR = srgbToLinear(ec.red) * ec.alpha
+                val linEmissiveG = srgbToLinear(ec.green) * ec.alpha
+                val linEmissiveB = srgbToLinear(ec.blue) * ec.alpha
+
+                // Total Linear Radiance = Diffuse + Specular + Emissive
+                val litR = diffR + specR + linEmissiveR
+                val litG = diffG + specG + linEmissiveG
+                val litB = diffB + specB + linEmissiveB
+
+                // 5. Convert from Linear back to sRGB with Filmic ACES Tone Mapping or Gamma
+                val outR = if (engineProfile.useFilmicToneMapping) linearToSrgb(litR) else litR.coerceIn(0f, 1f).pow(1f / 2.2f)
+                val outG = if (engineProfile.useFilmicToneMapping) linearToSrgb(litG) else litG.coerceIn(0f, 1f).pow(1f / 2.2f)
+                val outB = if (engineProfile.useFilmicToneMapping) linearToSrgb(litB) else litB.coerceIn(0f, 1f).pow(1f / 2.2f)
 
                 val shadedColor = Color(outR, outG, outB, c.alpha)
                 drawScope.drawPath(path = path, color = shadedColor)
@@ -257,6 +325,9 @@ class Renderer3D {
         val avgZ: Float,
         val diffuseIrradiance: Vec3,
         val specularRadiance: Vec3,
-        val baseColor: Color
+        val baseColor: Color,
+        val emissiveColor: Color,
+        val metallic: Float,
+        val roughness: Float
     )
 }

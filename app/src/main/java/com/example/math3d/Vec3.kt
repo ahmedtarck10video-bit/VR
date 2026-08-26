@@ -48,7 +48,13 @@ data class Triangle(
     val v2: Vec3,
     val v3: Vec3,
     val normal: Vec3,
-    val color: Long = 0L // 0 means default material
+    val color: Long = 0L, // Base / Diffuse color (ARGB)
+    val emissiveColor: Long = 0L, // Emissive / Glow color (ARGB)
+    val metallic: Float = 0.0f,
+    val roughness: Float = 0.5f,
+    val u1: Float = 0f, val v1Coord: Float = 0f,
+    val u2: Float = 0f, val v2Coord: Float = 0f,
+    val u3: Float = 0f, val v3Coord: Float = 0f
 ) {
     val center: Vec3 get() = Vec3((v1.x + v2.x + v3.x) / 3f, (v1.y + v2.y + v3.y) / 3f, (v1.z + v2.z + v3.z) / 3f)
 }

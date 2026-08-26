@@ -127,7 +127,9 @@ fun ARScreen(
                         wireframe = uiState.isWireframe,
                         primaryColor = uiState.modelColor,
                         drawShadow = true,
-                        drawFloorGrid = false
+                        drawFloorGrid = false,
+                        hdriPreset = uiState.hdriPreset,
+                        engineProfile = uiState.renderEngineProfile
                     )
                 }
             }
