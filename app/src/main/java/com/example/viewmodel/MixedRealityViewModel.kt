@@ -10,8 +10,15 @@ import androidx.lifecycle.viewModelScope
 import com.example.engine.HdriPreset
 import com.example.engine.SensorOrientation
 import com.example.engine.SensorTracker
+import com.example.engine.ar.ARCoreManager
+import com.example.engine.ar.ARPlacementMode
+import com.example.engine.ar.ARPlaneFilter
+import com.example.engine.ar.ARSurfaceAnchor
+import com.example.engine.ar.ARTrackedPlane
+import com.example.engine.ar.PlaneOrientation
 import com.example.math3d.Model3D
 import com.example.math3d.ModelFileLoader
+import com.example.math3d.Vec3
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -96,12 +103,25 @@ data class MRUiState(
     val hdriPreset: HdriPreset = HdriPreset.STUDIO_PRO,
     val isModelPickerOpen: Boolean = false,
     val isLoadingModel: Boolean = false,
-    val notificationMessage: String? = null
+    val notificationMessage: String? = null,
+
+    // ARCore & AR Foundation Plane Detection State
+    val detectedPlanes: List<ARTrackedPlane> = emptyList(),
+    val pointCloud: List<Vec3> = emptyList(),
+    val surfaceAnchor: ARSurfaceAnchor? = null,
+    val isPlaneMeshVisible: Boolean = true,
+    val isPointCloudVisible: Boolean = true,
+    val planeFilter: ARPlaneFilter = ARPlaneFilter.ALL,
+    val placementMode: ARPlacementMode = ARPlacementMode.TAP_TO_PLACE,
+    val selectedPlaneId: String? = null,
+    val arCoreStatus: String = "AR Surface Scanner Active",
+    val lightIntensity: Float = 1.0f
 )
 
 class MixedRealityViewModel(application: Application) : AndroidViewModel(application) {
 
     private val sensorTracker = SensorTracker(application)
+    val arCoreManager = ARCoreManager(application)
     private var recordingJob: Job? = null
 
     private val _uiState = MutableStateFlow(MRUiState())
@@ -109,14 +129,54 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
 
     init {
         sensorTracker.start()
+        arCoreManager.start()
+
         _uiState.value = _uiState.value.copy(
             models = emptyList(),
             currentModel = null,
             selectedModelIndex = 0
         )
+
+        // Observe sensors and update AR tracking
         viewModelScope.launch {
             sensorTracker.orientation.collect { orientation ->
                 _uiState.value = _uiState.value.copy(sensorOrientation = orientation)
+                arCoreManager.updateFrame(
+                    pitch = orientation.pitch,
+                    roll = orientation.roll,
+                    yaw = orientation.yaw
+                )
+            }
+        }
+
+        // Collect ARCore detected planes
+        viewModelScope.launch {
+            arCoreManager.trackedPlanes.collect { planes ->
+                _uiState.value = _uiState.value.copy(
+                    detectedPlanes = planes,
+                    arSurfaceDetected = planes.isNotEmpty()
+                )
+            }
+        }
+
+        // Collect ARCore point cloud
+        viewModelScope.launch {
+            arCoreManager.pointCloud.collect { points ->
+                _uiState.value = _uiState.value.copy(pointCloud = points)
+            }
+        }
+
+        // Collect ARCore tracking status
+        viewModelScope.launch {
+            arCoreManager.trackingStatus.collect { status ->
+                _uiState.value = _uiState.value.copy(arCoreStatus = status)
+            }
+        }
+
+        // Collect ARCore light estimation
+        viewModelScope.launch {
+            arCoreManager.lightIntensity.collect { intensity ->
+                _uiState.value = _uiState.value.copy(lightIntensity = intensity)
             }
         }
     }
@@ -124,10 +184,14 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     override fun onCleared() {
         super.onCleared()
         sensorTracker.stop()
+        arCoreManager.destroy()
     }
 
     fun setMode(mode: SpatialMode) {
         _uiState.value = _uiState.value.copy(currentMode = mode)
+        if (mode == SpatialMode.AR || mode == SpatialMode.MR) {
+            arCoreManager.start()
+        }
     }
 
     fun setMRSubMode(subMode: MRSubMode) {
@@ -144,6 +208,109 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     fun calibrateGyro() {
         sensorTracker.calibrate()
         showNotification("Gyroscope Calibrated")
+    }
+
+    // =========================================================================
+    // ARCORE PLANE HIT-TESTING & SURFACE PLACEMENT
+    // =========================================================================
+
+    /**
+     * Hit tests normalized screen tap coordinates against physical detected planes.
+     */
+    fun onSurfaceTapped(screenNormX: Float, screenNormY: Float) {
+        val hitResult = arCoreManager.hitTest(screenNormX, screenNormY)
+        if (hitResult != null) {
+            val (plane, hitPoint) = hitResult
+            val anchor = ARSurfaceAnchor(
+                id = "anchor_${System.currentTimeMillis()}",
+                planeId = plane.id,
+                position = hitPoint,
+                normal = plane.normal,
+                rotationY = _uiState.value.rotY,
+                scale = _uiState.value.scale,
+                isGrounded = true,
+                surfaceType = plane.orientation
+            )
+
+            _uiState.value = _uiState.value.copy(
+                surfaceAnchor = anchor,
+                selectedPlaneId = plane.id,
+                arAnchorPlaced = true,
+                panX = 0f,
+                panY = 0f
+            )
+            showNotification("Object Anchored to ${plane.orientation.label}")
+        } else {
+            showNotification("No surface detected at tap location")
+        }
+    }
+
+    fun placeModelOnDetectedSurface() {
+        val planes = _uiState.value.detectedPlanes
+        val targetPlane = planes.firstOrNull { it.orientation == PlaneOrientation.HORIZONTAL_UPWARD }
+            ?: planes.firstOrNull()
+
+        if (targetPlane != null) {
+            val anchor = ARSurfaceAnchor(
+                id = "anchor_snapped",
+                planeId = targetPlane.id,
+                position = targetPlane.center,
+                normal = targetPlane.normal,
+                rotationY = _uiState.value.rotY,
+                scale = _uiState.value.scale,
+                isGrounded = true,
+                surfaceType = targetPlane.orientation
+            )
+            _uiState.value = _uiState.value.copy(
+                surfaceAnchor = anchor,
+                selectedPlaneId = targetPlane.id,
+                arAnchorPlaced = true,
+                panX = 0f,
+                panY = 0f
+            )
+            showNotification("Anchored to ${targetPlane.orientation.label}")
+        } else {
+            showNotification("Scanning for physical surface...")
+        }
+    }
+
+    fun clearSurfaceAnchor() {
+        _uiState.value = _uiState.value.copy(
+            surfaceAnchor = null,
+            selectedPlaneId = null,
+            arAnchorPlaced = false
+        )
+        showNotification("Anchor Cleared")
+    }
+
+    fun togglePlaneMesh() {
+        val newVal = !_uiState.value.isPlaneMeshVisible
+        _uiState.value = _uiState.value.copy(isPlaneMeshVisible = newVal)
+        showNotification(if (newVal) "Plane Meshes Visible" else "Plane Meshes Hidden")
+    }
+
+    fun togglePointCloud() {
+        val newVal = !_uiState.value.isPointCloudVisible
+        _uiState.value = _uiState.value.copy(isPointCloudVisible = newVal)
+        showNotification(if (newVal) "Feature Points Visible" else "Feature Points Hidden")
+    }
+
+    fun setPlaneFilter(filter: ARPlaneFilter) {
+        _uiState.value = _uiState.value.copy(planeFilter = filter)
+        showNotification("Filter: ${filter.label}")
+    }
+
+    fun setPlacementMode(mode: ARPlacementMode) {
+        _uiState.value = _uiState.value.copy(placementMode = mode)
+        showNotification("Mode: ${mode.label}")
+    }
+
+    fun selectPlane(planeId: String) {
+        _uiState.value = _uiState.value.copy(selectedPlaneId = planeId)
+        val plane = _uiState.value.detectedPlanes.firstOrNull { it.id == planeId }
+        if (plane != null) {
+            showNotification("Selected: ${plane.orientation.label} (${String.format("%.1f", plane.extentX)}m × ${String.format("%.1f", plane.extentZ)}m)")
+        }
     }
 
     fun loadModelFromUri(context: Context, uri: Uri) {
@@ -201,7 +368,6 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             }
         }
     }
-
 
     fun selectModel(index: Int) {
         if (index in _uiState.value.models.indices) {
@@ -266,7 +432,8 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             scale = 1.0f,
             panX = 0f,
             panY = 0f,
-            arAnchorPlaced = false
+            arAnchorPlaced = false,
+            surfaceAnchor = null
         )
         showNotification("Cleared Model & Canvas")
     }
@@ -339,7 +506,11 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun toggleArAnchor() {
-        _uiState.value = _uiState.value.copy(arAnchorPlaced = !_uiState.value.arAnchorPlaced)
+        if (_uiState.value.surfaceAnchor != null) {
+            clearSurfaceAnchor()
+        } else {
+            placeModelOnDetectedSurface()
+        }
     }
 
     fun openApp(appId: SpatialAppId) {
@@ -387,3 +558,4 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(spatialAudioEnabled = !_uiState.value.spatialAudioEnabled)
     }
 }
+

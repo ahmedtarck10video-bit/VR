@@ -71,4 +71,7 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
+
+    // Google ARCore for Real-time Plane Detection & Spatial Surface Tracking
+    implementation("com.google.ar:core:1.41.0")
 }

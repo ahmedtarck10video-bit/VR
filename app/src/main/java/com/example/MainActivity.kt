@@ -14,6 +14,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -32,12 +33,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.engine.Renderer3D
+import com.example.engine.ar.ARPlaneFilter
+import com.example.engine.ar.ARPlaneRenderer
 import com.example.ui.components.CameraPreview
 import com.example.ui.components.StereoDualCameraPreview
 import com.example.ui.theme.MixedRealityTheme
@@ -93,6 +97,8 @@ fun SpatialMainScreen(
     }
 
     val renderer = remember { Renderer3D() }
+    val arPlaneRenderer = remember { ARPlaneRenderer() }
+    val textMeasurer = rememberTextMeasurer()
     val currentModel = uiState.currentModel
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0F172A))) {
@@ -188,7 +194,9 @@ fun SpatialMainScreen(
             }
 
             SpatialMode.AR -> {
-                // AR Mode: Real Camera Passthrough + Gyroscope Space Tracking
+                // =============================================================
+                // AR MODE: ARCore Plane Detection, Surface Hit-Testing & Anchoring
+                // =============================================================
                 val gyroPitch = if (uiState.isGyroEnabled) -uiState.sensorOrientation.pitch else 0f
                 val gyroRoll = if (uiState.isGyroEnabled) uiState.sensorOrientation.roll else 0f
                 val gyroYaw = if (uiState.isGyroEnabled) uiState.sensorOrientation.yaw else 0f
@@ -202,39 +210,228 @@ fun SpatialMainScreen(
                         // Direct Camera Stream
                         CameraPreview(modifier = Modifier.fillMaxSize())
 
-                        // 3D Object Overlay with Gyroscope integration
-                        if (currentModel != null) {
-                            Canvas(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .pointerInput(Unit) {
-                                        detectTransformGestures { _, pan, zoom, rotation ->
-                                            if (pan.x != 0f || pan.y != 0f) {
-                                                viewModel.updatePan(pan.x, pan.y)
-                                            }
-                                            if (zoom != 1.0f) {
-                                                viewModel.updateScale(zoom)
-                                            }
-                                            if (rotation != 0f) {
-                                                viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
-                                            }
+                        // Interactive AR Plane Detection & 3D Model Canvas
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = { offset ->
+                                            val normX = offset.x / size.width.toFloat()
+                                            val normY = offset.y / size.height.toFloat()
+                                            viewModel.onSurfaceTapped(normX, normY)
+                                        },
+                                        onDoubleTap = {
+                                            viewModel.resetPosition()
+                                        }
+                                    )
+                                }
+                                .pointerInput(Unit) {
+                                    detectTransformGestures { _, pan, zoom, rotation ->
+                                        if (pan.x != 0f || pan.y != 0f) {
+                                            viewModel.updatePan(pan.x, pan.y)
+                                        }
+                                        if (zoom != 1.0f) {
+                                            viewModel.updateScale(zoom)
+                                        }
+                                        if (rotation != 0f) {
+                                            viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
                                         }
                                     }
-                            ) {
+                                }
+                        ) {
+                            // 1. Render ARCore Detected Planes, Meshes, and Point Cloud
+                            arPlaneRenderer.renderPlanes(
+                                drawScope = this,
+                                planes = uiState.detectedPlanes,
+                                pointCloud = uiState.pointCloud,
+                                anchor = uiState.surfaceAnchor,
+                                isPlaneMeshVisible = uiState.isPlaneMeshVisible,
+                                isPointCloudVisible = uiState.isPointCloudVisible,
+                                selectedPlaneId = uiState.selectedPlaneId,
+                                filter = uiState.planeFilter,
+                                textMeasurer = textMeasurer
+                            )
+
+                            // 2. Render 3D Model Anchored to Physical Surface
+                            if (currentModel != null) {
+                                val anchor = uiState.surfaceAnchor
+                                val basePanY = if (anchor != null) 120f else 0f
+
                                 renderer.render(
                                     drawScope = this,
                                     model = currentModel,
                                     rotX = uiState.rotX + gyroPitch,
-                                    rotY = uiState.rotY + gyroRoll,
-                                    rotZ = gyroYaw * 0.5f,
-                                    scale = uiState.scale,
-                                    panX = uiState.panX + (gyroRoll * 200f),
-                                    panY = uiState.panY - (gyroPitch * 200f),
-                                    wireframe = false,
+                                    rotY = uiState.rotY + gyroRoll + (anchor?.rotationY ?: 0f),
+                                    rotZ = gyroYaw * 0.4f,
+                                    scale = uiState.scale * (anchor?.scale ?: 1.0f),
+                                    panX = uiState.panX + (gyroRoll * 180f),
+                                    panY = uiState.panY + basePanY - (gyroPitch * 180f),
+                                    wireframe = uiState.isWireframe,
                                     primaryColor = uiState.modelColor,
-                                    drawShadow = false,
+                                    drawShadow = true, // Grounded drop shadow on physical surface
                                     drawFloorGrid = false,
                                     hdriPreset = uiState.hdriPreset
+                                )
+                            }
+                        }
+
+                        // Top ARCore Status Badge
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .windowInsetsPadding(WindowInsets.statusBars)
+                                .padding(top = 74.dp, start = 16.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(Color(0xCC0F172A))
+                                .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(18.dp))
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (uiState.detectedPlanes.isNotEmpty()) Color(0xFF00FF88) else Color(0xFFFFB703)
+                                        )
+                                )
+                                Text(
+                                    text = uiState.arCoreStatus,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        // Right-Side AR Surface Controls HUD
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            // Toggle Plane Meshes
+                            IconButton(
+                                onClick = { viewModel.togglePlaneMesh() },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (uiState.isPlaneMeshVisible) Color(0xCC00E5FF) else Color(0x991E293B)
+                                    )
+                                    .border(1.dp, Color(0x44FFFFFF), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Grid4x4,
+                                    contentDescription = "Toggle Plane Meshes",
+                                    tint = if (uiState.isPlaneMeshVisible) Color.Black else Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            // Toggle Point Cloud
+                            IconButton(
+                                onClick = { viewModel.togglePointCloud() },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (uiState.isPointCloudVisible) Color(0xCC00FF88) else Color(0x991E293B)
+                                    )
+                                    .border(1.dp, Color(0x44FFFFFF), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ScatterPlot,
+                                    contentDescription = "Toggle Feature Points",
+                                    tint = if (uiState.isPointCloudVisible) Color.Black else Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            // Plane Filter (All -> Horizontal -> Vertical)
+                            IconButton(
+                                onClick = {
+                                    val nextFilter = when (uiState.planeFilter) {
+                                        ARPlaneFilter.ALL -> ARPlaneFilter.HORIZONTAL_ONLY
+                                        ARPlaneFilter.HORIZONTAL_ONLY -> ARPlaneFilter.VERTICAL_ONLY
+                                        ARPlaneFilter.VERTICAL_ONLY -> ARPlaneFilter.ALL
+                                    }
+                                    viewModel.setPlaneFilter(nextFilter)
+                                },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x991E293B))
+                                    .border(1.dp, Color(0x44FFFFFF), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FilterList,
+                                    contentDescription = "Surface Filter",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            // Snap to Surface / Anchor
+                            IconButton(
+                                onClick = { viewModel.placeModelOnDetectedSurface() },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (uiState.surfaceAnchor != null) Color(0xCC00FF88) else Color(0x991E293B)
+                                    )
+                                    .border(1.dp, Color(0x44FFFFFF), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.VerticalAlignBottom,
+                                    contentDescription = "Snap to Surface",
+                                    tint = if (uiState.surfaceAnchor != null) Color.Black else Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            // Clear Anchor
+                            if (uiState.surfaceAnchor != null) {
+                                IconButton(
+                                    onClick = { viewModel.clearSurfaceAnchor() },
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xCCFF0055))
+                                        .border(1.dp, Color(0x44FFFFFF), CircleShape)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LayersClear,
+                                        contentDescription = "Clear Anchor",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Bottom Tap Guidance Hint
+                        if (uiState.surfaceAnchor == null) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 90.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0x99000000))
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "Tap on any detected surface grid to place 3D model",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Normal
                                 )
                             }
                         }
