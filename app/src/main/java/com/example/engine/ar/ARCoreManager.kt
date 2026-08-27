@@ -36,6 +36,7 @@ class ARCoreManager(private val context: Context) {
     private val _trackingStatus = MutableStateFlow("Initializing ARCore...")
     val trackingStatus: StateFlow<String> = _trackingStatus.asStateFlow()
 
+    private var latestFrame: Frame? = null
     private var fallbackTimeSec = 0f
 
     init {
@@ -138,6 +139,7 @@ class ARCoreManager(private val context: Context) {
     }
 
     private fun processARCoreFrame(frame: Frame) {
+        latestFrame = frame
         val currentSession = session ?: return
 
         // 1. Process Tracked Planes from ARCore
@@ -240,18 +242,49 @@ class ARCoreManager(private val context: Context) {
     }
 
     /**
-     * Hit-tests screen touch coordinates against detected physical planes.
+     * Hit-tests screen touch coordinates against real ARCore surfaces using Frame.hitTest.
      * Returns the 3D surface intersection point and hit plane.
      */
-    fun hitTest(screenNormX: Float, screenNormY: Float): Pair<ARTrackedPlane, Vec3>? {
+     fun hitTest(screenNormX: Float, screenNormY: Float, viewWidthPx: Float = 1080f, viewHeightPx: Float = 1920f): Pair<ARTrackedPlane, Vec3>? {
+        val frame = latestFrame
         val planes = _trackedPlanes.value
+
+        // 1. Native ARCore Frame.hitTest (Pixel Perfect 6DOF Real Plane Intersection)
+        if (frame != null && isSessionRunning) {
+            try {
+                val pixelX = screenNormX * viewWidthPx
+                val pixelY = screenNormY * viewHeightPx
+                val hitResults = frame.hitTest(pixelX, pixelY)
+
+                for (hit in hitResults) {
+                    val trackable = hit.trackable
+                    if (trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) {
+                        val hitPose = hit.hitPose
+                        val hitVec = Vec3(hitPose.tx(), hitPose.ty(), hitPose.tz())
+                        val planeId = "arcore_plane_${trackable.hashCode()}"
+                        val matchedPlane = planes.firstOrNull { it.id == planeId } ?: ARTrackedPlane(
+                            id = planeId,
+                            center = Vec3(trackable.centerPose.tx(), trackable.centerPose.ty(), trackable.centerPose.tz()),
+                            normal = Vec3(0f, 1f, 0f),
+                            extentX = trackable.extentX,
+                            extentZ = trackable.extentZ,
+                            polygon = emptyList(),
+                            orientation = if (trackable.type == Plane.Type.VERTICAL) PlaneOrientation.VERTICAL else PlaneOrientation.HORIZONTAL_UPWARD
+                        )
+                        return Pair(matchedPlane, hitVec)
+                    }
+                }
+            } catch (e: Exception) {
+                // Fallback to geometric testing
+            }
+        }
+
         if (planes.isEmpty()) return null
 
-        // Ray direction from normalized screen coordinate [-1..1]
+        // 2. Geometric plane fallback
         val rayX = (screenNormX - 0.5f) * 2.0f
         val rayY = -(screenNormY - 0.5f) * 2.0f
 
-        // Test each plane against ray
         for (plane in planes) {
             if (plane.orientation == PlaneOrientation.HORIZONTAL_UPWARD) {
                 val targetY = plane.center.y
@@ -259,7 +292,6 @@ class ARCoreManager(private val context: Context) {
                 val hitX = rayX * distZ * 0.55f
                 val hitZ = distZ
 
-                // Check bounding box
                 val halfX = plane.extentX * 0.7f
                 val halfZ = plane.extentZ * 0.7f
                 if (abs(hitX - plane.center.x) <= halfX && abs(hitZ - plane.center.z) <= halfZ) {
@@ -277,7 +309,6 @@ class ARCoreManager(private val context: Context) {
             }
         }
 
-        // Default to primary floor plane center
         val primary = planes.firstOrNull { it.orientation == PlaneOrientation.HORIZONTAL_UPWARD } ?: planes.first()
         return Pair(primary, primary.center)
     }

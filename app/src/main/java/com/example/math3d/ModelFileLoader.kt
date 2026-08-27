@@ -779,7 +779,7 @@ object ModelFileLoader {
         return emptyList()
     }
 
-    private fun parseGltf(jsonString: String): List<Triangle> {
+    private fun parseGltf(jsonString: String, modelDir: java.io.File? = null): List<Triangle> {
         try {
             val root = JSONObject(jsonString)
             var binaryBuffer: ByteArray? = null
@@ -793,19 +793,24 @@ object ModelFileLoader {
                         if (uriStr.startsWith("data:") && uriStr.contains("base64,")) {
                             val base64Data = uriStr.substringAfter("base64,")
                             binaryBuffer = Base64.decode(base64Data, Base64.DEFAULT)
+                        } else if (modelDir != null) {
+                            val binFile = java.io.File(modelDir, uriStr.replace('\\', '/'))
+                            if (binFile.exists() && binFile.canRead()) {
+                                binaryBuffer = binFile.readBytes()
+                            }
                         }
                     }
                 }
             }
 
-            return parseGltfJsonData(jsonString, binaryBuffer)
+            return parseGltfJsonData(jsonString, binaryBuffer, modelDir)
         } catch (e: Exception) {
             e.printStackTrace()
         }
         return emptyList()
     }
 
-    private fun parseGltfJsonData(jsonString: String, binaryPayload: ByteArray?): List<Triangle> {
+    private fun parseGltfJsonData(jsonString: String, binaryPayload: ByteArray?, modelDir: java.io.File? = null): List<Triangle> {
         val triangles = ArrayList<Triangle>(50000)
         try {
             val root = JSONObject(jsonString)
@@ -825,13 +830,18 @@ object ModelFileLoader {
                         if (uriStr.startsWith("data:") && uriStr.contains("base64,")) {
                             val b64 = uriStr.substringAfter("base64,")
                             buffersList.add(Base64.decode(b64, Base64.DEFAULT))
+                        } else if (modelDir != null) {
+                            val binFile = java.io.File(modelDir, uriStr.replace('\\', '/'))
+                            if (binFile.exists() && binFile.canRead()) {
+                                buffersList.add(binFile.readBytes())
+                            }
                         }
                     }
                 }
             }
 
             val materials = root.optJSONArray("materials")
-            val gltfTextureManager = GltfTextureManager(root, buffersList)
+            val gltfTextureManager = GltfTextureManager(root, buffersList, modelDir)
 
             for (m in 0 until meshes.length()) {
                 val mesh = meshes.getJSONObject(m)

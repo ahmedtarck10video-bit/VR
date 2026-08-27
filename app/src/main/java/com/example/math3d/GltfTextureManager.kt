@@ -14,7 +14,8 @@ import java.nio.ByteOrder
  */
 class GltfTextureManager(
     private val root: JSONObject,
-    private val buffersList: List<ByteArray>
+    private val buffersList: List<ByteArray>,
+    private val modelDir: java.io.File? = null
 ) {
     private val imagesList = mutableListOf<Bitmap?>()
     private val texturesList = mutableListOf<Int>() // maps textureIndex -> imageIndex
@@ -53,6 +54,12 @@ class GltfTextureManager(
                         val b64 = uriStr.substringAfter("base64,")
                         val imgBytes = Base64.decode(b64, Base64.DEFAULT)
                         bmp = BitmapFactory.decodeByteArray(imgBytes, 0, imgBytes.size)
+                    } else if (modelDir != null) {
+                        val cleanRelPath = uriStr.replace('\\', '/')
+                        val externalFile = java.io.File(modelDir, cleanRelPath)
+                        if (externalFile.exists() && externalFile.canRead()) {
+                            bmp = BitmapFactory.decodeFile(externalFile.absolutePath)
+                        }
                     }
                 }
             } catch (e: Exception) {
