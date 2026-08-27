@@ -80,6 +80,12 @@ object ModelFileLoader {
         // Fast path for native GLB / GLTF / USDZ / ZIP packages:
         // Pass directly to SceneView / Filament ModelLoader without CPU triangle conversion!
         if (isGlbOrGltf && finalFilePath != null && java.io.File(finalFilePath).exists()) {
+            val file = java.io.File(finalFilePath)
+            val extractedDims = extractGltfOrGlbDimensions(file)
+            val realW = extractedDims?.first ?: 0.5f
+            val realH = extractedDims?.second ?: 0.5f
+            val realD = extractedDims?.third ?: 0.5f
+
             return Model3D(
                 name = displayName,
                 description = "Hardware Accelerated 3D PBR Model (${getFileFormatLabel(parsedTargetName)})",
@@ -87,9 +93,9 @@ object ModelFileLoader {
                 fileUri = uri,
                 localFilePath = finalFilePath,
                 isGlbOrGltf = true,
-                realWorldWidthMeters = 0.5f,
-                realWorldHeightMeters = 0.5f,
-                realWorldDepthMeters = 0.5f
+                realWorldWidthMeters = realW,
+                realWorldHeightMeters = realH,
+                realWorldDepthMeters = realD
             )
         }
 
@@ -120,13 +126,14 @@ object ModelFileLoader {
                 realD = max(0.05f, maxZ - minZ)
             }
 
-            val normalized = if (triangles.isNotEmpty()) normalizeAndCenterMesh(triangles) else emptyList()
+            // Center at origin for clean rotation pivot while preserving 1:1 metric coordinates (no double-scaling)
+            val centered = if (triangles.isNotEmpty()) centerMeshAtOrigin(triangles) else emptyList()
 
             // If non-GLB format (e.g. OBJ/STL/PLY) was parsed, convert to standard binary GLB so Filament loads it directly
             var glbFilePath = finalFilePath
             if (glbFilePath == null || (!glbFilePath.lowercase().endsWith(".glb") && !glbFilePath.lowercase().endsWith(".gltf"))) {
-                if (normalized.isNotEmpty()) {
-                    val exportedGlb = exportTrianglesToGlbFile(context, parsedTargetName, normalized)
+                if (centered.isNotEmpty()) {
+                    val exportedGlb = exportTrianglesToGlbFile(context, parsedTargetName, centered)
                     if (exportedGlb != null) {
                         glbFilePath = exportedGlb
                     }
@@ -136,8 +143,8 @@ object ModelFileLoader {
             if (triangles.isNotEmpty() || (glbFilePath != null && java.io.File(glbFilePath).exists())) {
                 Model3D(
                     name = displayName,
-                    description = if (triangles.isNotEmpty()) "${normalized.size} polygons loaded (${getFileFormatLabel(parsedTargetName)})" else "Hardware Accelerated 3D Model (${getFileFormatLabel(parsedTargetName)})",
-                    triangles = normalized,
+                    description = if (triangles.isNotEmpty()) "${centered.size} polygons loaded (${getFileFormatLabel(parsedTargetName)})" else "Hardware Accelerated 3D Model (${getFileFormatLabel(parsedTargetName)})",
+                    triangles = centered,
                     fileUri = uri,
                     localFilePath = glbFilePath,
                     isGlbOrGltf = true,
@@ -152,6 +159,165 @@ object ModelFileLoader {
             e.printStackTrace()
             null
         }
+    }
+
+    /**
+     * Extracts precise real-world metric dimensions (bounding box width, height, depth)
+     * directly from GLB / GLTF binary / JSON headers without CPU triangle conversion.
+     */
+    fun extractGltfOrGlbDimensions(file: java.io.File): Triple<Float, Float, Float>? {
+        return try {
+            val name = file.name.lowercase()
+            val jsonString = if (name.endsWith(".glb")) {
+                file.inputStream().use { stream ->
+                    val header = ByteArray(12)
+                    if (stream.read(header) < 12) return null
+                    val byteBuf = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                    val magic = byteBuf.int
+                    if (magic != 0x46546C67) return null // "glTF"
+                    
+                    val chunkHeader = ByteArray(8)
+                    if (stream.read(chunkHeader) < 8) return null
+                    val chunkBuf = java.nio.ByteBuffer.wrap(chunkHeader).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                    val chunkLen = chunkBuf.int
+                    val chunkType = chunkBuf.int
+                    if (chunkType != 0x4E4F534A) return null // "JSON"
+                    
+                    val jsonBytes = ByteArray(chunkLen)
+                    var read = 0
+                    while (read < chunkLen) {
+                        val r = stream.read(jsonBytes, read, chunkLen - read)
+                        if (r <= 0) break
+                        read += r
+                    }
+                    String(jsonBytes, Charsets.UTF_8)
+                }
+            } else if (name.endsWith(".gltf")) {
+                file.readText(Charsets.UTF_8)
+            } else {
+                null
+            } ?: return null
+
+            val root = JSONObject(jsonString)
+            val accessors = root.optJSONArray("accessors") ?: return null
+            val meshes = root.optJSONArray("meshes")
+
+            var overallMinX = Float.MAX_VALUE
+            var overallMinY = Float.MAX_VALUE
+            var overallMinZ = Float.MAX_VALUE
+            var overallMaxX = -Float.MAX_VALUE
+            var overallMaxY = -Float.MAX_VALUE
+            var overallMaxZ = -Float.MAX_VALUE
+            var found = false
+
+            // Strategy 1: Check accessors referenced as "POSITION" in mesh primitives
+            if (meshes != null) {
+                for (m in 0 until meshes.length()) {
+                    val mesh = meshes.optJSONObject(m) ?: continue
+                    val primitives = mesh.optJSONArray("primitives") ?: continue
+                    for (p in 0 until primitives.length()) {
+                        val prim = primitives.optJSONObject(p) ?: continue
+                        val attributes = prim.optJSONObject("attributes") ?: continue
+                        val posAccIdx = attributes.optInt("POSITION", -1)
+                        if (posAccIdx in 0 until accessors.length()) {
+                            val acc = accessors.optJSONObject(posAccIdx) ?: continue
+                            val minArr = acc.optJSONArray("min")
+                            val maxArr = acc.optJSONArray("max")
+                            if (minArr != null && maxArr != null && minArr.length() >= 3 && maxArr.length() >= 3) {
+                                overallMinX = min(overallMinX, minArr.getDouble(0).toFloat())
+                                overallMinY = min(overallMinY, minArr.getDouble(1).toFloat())
+                                overallMinZ = min(overallMinZ, minArr.getDouble(2).toFloat())
+                                overallMaxX = max(overallMaxX, maxArr.getDouble(0).toFloat())
+                                overallMaxY = max(overallMaxY, maxArr.getDouble(1).toFloat())
+                                overallMaxZ = max(overallMaxZ, maxArr.getDouble(2).toFloat())
+                                found = true
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Strategy 2: Scan all accessors of type VEC3 with min/max
+            if (!found) {
+                for (a in 0 until accessors.length()) {
+                    val acc = accessors.optJSONObject(a) ?: continue
+                    val type = acc.optString("type")
+                    if (type == "VEC3") {
+                        val minArr = acc.optJSONArray("min")
+                        val maxArr = acc.optJSONArray("max")
+                        if (minArr != null && maxArr != null && minArr.length() >= 3 && maxArr.length() >= 3) {
+                            overallMinX = min(overallMinX, minArr.getDouble(0).toFloat())
+                            overallMinY = min(overallMinY, minArr.getDouble(1).toFloat())
+                            overallMinZ = min(overallMinZ, minArr.getDouble(2).toFloat())
+                            overallMaxX = max(overallMaxX, maxArr.getDouble(0).toFloat())
+                            overallMaxY = max(overallMaxY, maxArr.getDouble(1).toFloat())
+                            overallMaxZ = max(overallMaxZ, maxArr.getDouble(2).toFloat())
+                            found = true
+                        }
+                    }
+                }
+            }
+
+            if (found && overallMaxX > overallMinX && overallMaxY > overallMinY) {
+                val w = max(0.01f, overallMaxX - overallMinX)
+                val h = max(0.01f, overallMaxY - overallMinY)
+                val d = max(0.01f, if (overallMaxZ >= overallMinZ) overallMaxZ - overallMinZ else 0.05f)
+                Triple(w, h, d)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Centers mesh geometry at local origin (0, 0, 0) without distorting original 1:1 metric coordinates.
+     */
+    fun centerMeshAtOrigin(triangles: List<Triangle>): List<Triangle> {
+        if (triangles.isEmpty()) return triangles
+
+        var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+
+        for (t in triangles) {
+            for (v in listOf(t.v1, t.v2, t.v3)) {
+                minX = min(minX, v.x); minY = min(minY, v.y); minZ = min(minZ, v.z)
+                maxX = max(maxX, v.x); maxY = max(maxY, v.y); maxZ = max(maxZ, v.z)
+            }
+        }
+
+        val centerX = (minX + maxX) / 2f
+        val centerY = (minY + maxY) / 2f
+        val centerZ = (minZ + maxZ) / 2f
+
+        val result = ArrayList<Triangle>(triangles.size)
+        for (t in triangles) {
+            val v1 = Vec3(t.v1.x - centerX, t.v1.y - centerY, t.v1.z - centerZ)
+            val v2 = Vec3(t.v2.x - centerX, t.v2.y - centerY, t.v2.z - centerZ)
+            val v3 = Vec3(t.v3.x - centerX, t.v3.y - centerY, t.v3.z - centerZ)
+            val norm = (v2 - v1).cross(v3 - v1).normalize()
+
+            result.add(
+                Triangle(
+                    v1 = v1,
+                    v2 = v2,
+                    v3 = v3,
+                    normal = if (norm.lengthSq() > 1e-6f) norm else t.normal,
+                    color = t.color,
+                    emissiveColor = t.emissiveColor,
+                    metallic = t.metallic,
+                    roughness = t.roughness,
+                    u1 = t.u1,
+                    v1Coord = t.v1Coord,
+                    u2 = t.u2,
+                    v2Coord = t.v2Coord,
+                    u3 = t.u3,
+                    v3Coord = t.v3Coord
+                )
+            )
+        }
+        return result
     }
 
     private fun findMainModelInFolder(folder: java.io.File): java.io.File? {

@@ -149,11 +149,21 @@ fun Object3DScreen(
                     color = Color(0xCCFFFFFF)
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Polygons: ${currentModel.triangles.size} Tris • Spatial Mesh",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0x8800E5FF)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (currentModel.triangles.isNotEmpty()) "${currentModel.triangles.size} Tris" else "Hardware PBR Mesh",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0x8800E5FF)
+                    )
+                    Text(
+                        text = "Size: ${String.format("%.2f", currentModel.realWorldWidthMeters)}m × ${String.format("%.2f", currentModel.realWorldHeightMeters)}m × ${String.format("%.2f", currentModel.realWorldDepthMeters)}m",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xAAFFFFFF)
+                    )
+                }
             }
         }
 

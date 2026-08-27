@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.engine.ar.ARSurfaceAnchor
 import com.example.math3d.Model3D
 import com.example.ui.theme.GlowGreen
 import com.example.ui.theme.NeonCyan
@@ -29,14 +30,12 @@ import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
 import io.github.sceneview.math.Scale
 import io.github.sceneview.node.ModelNode
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
  * Hardware-Accelerated AR Viewport with Google ARCore & Filament PBR Engine.
- * Anchors photorealistic GLB / GLTF assets to detected physical surfaces with metric 1:1 scale.
+ * Anchors photorealistic GLB / GLTF assets to detected physical surfaces with true metric 1:1 scale.
  * Automatically falls back to CameraPreview + SceneView with clear simulation indicator on devices without ARCore.
  */
 @Composable
@@ -48,19 +47,49 @@ fun SceneviewARViewport(
     scale: Float = 1.0f,
     panX: Float = 0f,
     panY: Float = 0f,
+    surfaceAnchor: ARSurfaceAnchor? = null,
+    isAnchored: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var currentModelNode by remember { mutableStateOf<ModelNode?>(null) }
+    var arSceneViewRef by remember { mutableStateOf<ARSceneView?>(null) }
+    var sceneViewRef by remember { mutableStateOf<SceneView?>(null) }
     var lastLoadedPath by remember { mutableStateOf<String?>(null) }
 
     val isArCoreInstalled = remember {
         try {
-            val pInfo = context.packageManager.getPackageInfo("com.google.ar.core", 0)
-            pInfo != null
+            val pInfo = try {
+                context.packageManager.getPackageInfo("com.google.ar.core", 0)
+            } catch (e: Exception) {
+                null
+            }
+            if (pInfo != null) {
+                val availability = ArCoreApk.getInstance().checkAvailability(context)
+                availability == ArCoreApk.Availability.SUPPORTED_INSTALLED
+            } else {
+                false
+            }
         } catch (e: Throwable) {
             false
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                currentModelNode?.let { node ->
+                    arSceneViewRef?.removeChildNode(node)
+                    sceneViewRef?.removeChildNode(node)
+                    node.destroy()
+                }
+                currentModelNode = null
+                arSceneViewRef = null
+                sceneViewRef = null
+            } catch (e: Exception) {
+                // Safe cleanup
+            }
         }
     }
 
@@ -70,12 +99,29 @@ fun SceneviewARViewport(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
                     ARSceneView(ctx).apply {
-                        planeRenderer.isVisible = false
+                        planeRenderer.isVisible = true
+                        arSceneViewRef = this
                     }
                 },
                 update = { arSceneView ->
+                    arSceneViewRef = arSceneView
                     val targetModel = model
                     val targetPath = targetModel?.localFilePath ?: targetModel?.fileUri?.toString()
+
+                    // Compute true 3D position (anchored to physical plane or placed at camera preview depth)
+                    val targetPos = if (surfaceAnchor != null && isAnchored) {
+                        Position(
+                            x = surfaceAnchor.position.x + (panX * 0.001f),
+                            y = surfaceAnchor.position.y - (panY * 0.001f),
+                            z = surfaceAnchor.position.z
+                        )
+                    } else {
+                        Position(
+                            x = panX * 0.002f,
+                            y = -panY * 0.002f,
+                            z = -1.2f
+                        )
+                    }
 
                     if (targetModel != null && targetPath != null && targetPath != lastLoadedPath) {
                         lastLoadedPath = targetPath
@@ -92,17 +138,19 @@ fun SceneviewARViewport(
                                 }
 
                                 if (instance != null) {
-                                    currentModelNode?.let { arSceneView.removeChildNode(it) }
-                                    val metricUnitScale = targetModel.realWorldHeightMeters.coerceIn(0.1f, 3.0f)
+                                    currentModelNode?.let { oldNode ->
+                                        arSceneView.removeChildNode(oldNode)
+                                        oldNode.destroy()
+                                    }
                                     val newNode = ModelNode(
-                                        modelInstance = instance,
-                                        scaleToUnits = metricUnitScale // 1:1 metric scale in AR world
+                                        modelInstance = instance
                                     ).apply {
-                                        this.position = Position(x = panX * 0.002f, y = -panY * 0.002f, z = -1.0f)
+                                        this.position = targetPos
                                         this.scale = Scale(scale, scale, scale)
                                         val finalRotY = (rotY * 180f / Math.PI.toFloat())
                                         val finalRotX = (rotX * 180f / Math.PI.toFloat())
-                                        this.rotation = Rotation(x = finalRotX, y = finalRotY, z = rotZ)
+                                        val finalRotZ = (rotZ * 180f / Math.PI.toFloat())
+                                        this.rotation = Rotation(x = finalRotX, y = finalRotY, z = finalRotZ)
                                     }
                                     arSceneView.addChildNode(newNode)
                                     currentModelNode = newNode
@@ -113,17 +161,18 @@ fun SceneviewARViewport(
                         }
                     } else {
                         currentModelNode?.let { node ->
-                            node.position = Position(x = panX * 0.002f, y = -panY * 0.002f, z = -1.0f)
+                            node.position = targetPos
                             node.scale = Scale(scale, scale, scale)
                             val finalRotY = (rotY * 180f / Math.PI.toFloat())
                             val finalRotX = (rotX * 180f / Math.PI.toFloat())
-                            node.rotation = Rotation(x = finalRotX, y = finalRotY, z = rotZ)
+                            val finalRotZ = (rotZ * 180f / Math.PI.toFloat())
+                            node.rotation = Rotation(x = finalRotX, y = finalRotY, z = finalRotZ)
                         }
                     }
                 }
             )
         } else {
-            // Camera Stream Passthrough + GPU SceneView
+            // Camera Stream Passthrough + GPU SceneView for non-ARCore devices
             CameraPreview(modifier = Modifier.fillMaxSize())
 
             AndroidView(
@@ -131,11 +180,15 @@ fun SceneviewARViewport(
                 factory = { ctx ->
                     SceneView(ctx).apply {
                         cameraNode.position = Position(0f, 0f, 3.5f)
+                        sceneViewRef = this
                     }
                 },
                 update = { sceneView ->
+                    sceneViewRef = sceneView
                     val targetModel = model
                     val targetPath = targetModel?.localFilePath ?: targetModel?.fileUri?.toString()
+
+                    val targetPos = Position(x = panX * 0.005f, y = -panY * 0.005f, z = 0f)
 
                     if (targetModel != null && targetPath != null && targetPath != lastLoadedPath) {
                         lastLoadedPath = targetPath
@@ -152,17 +205,19 @@ fun SceneviewARViewport(
                                 }
 
                                 if (instance != null) {
-                                    currentModelNode?.let { sceneView.removeChildNode(it) }
-                                    val metricUnitScale = targetModel.realWorldHeightMeters.coerceIn(0.2f, 2.5f)
+                                    currentModelNode?.let { oldNode ->
+                                        sceneView.removeChildNode(oldNode)
+                                        oldNode.destroy()
+                                    }
                                     val newNode = ModelNode(
-                                        modelInstance = instance,
-                                        scaleToUnits = metricUnitScale
+                                        modelInstance = instance
                                     ).apply {
-                                        this.position = Position(x = panX * 0.005f, y = -panY * 0.005f, z = 0f)
+                                        this.position = targetPos
                                         this.scale = Scale(scale, scale, scale)
                                         val finalRotY = (rotY * 180f / Math.PI.toFloat())
                                         val finalRotX = (rotX * 180f / Math.PI.toFloat())
-                                        this.rotation = Rotation(x = finalRotX, y = finalRotY, z = rotZ)
+                                        val finalRotZ = (rotZ * 180f / Math.PI.toFloat())
+                                        this.rotation = Rotation(x = finalRotX, y = finalRotY, z = finalRotZ)
                                     }
                                     sceneView.addChildNode(newNode)
                                     currentModelNode = newNode
@@ -173,11 +228,12 @@ fun SceneviewARViewport(
                         }
                     } else {
                         currentModelNode?.let { node ->
-                            node.position = Position(x = panX * 0.005f, y = -panY * 0.005f, z = 0f)
+                            node.position = targetPos
                             node.scale = Scale(scale, scale, scale)
                             val finalRotY = (rotY * 180f / Math.PI.toFloat())
                             val finalRotX = (rotX * 180f / Math.PI.toFloat())
-                            node.rotation = Rotation(x = finalRotX, y = finalRotY, z = rotZ)
+                            val finalRotZ = (rotZ * 180f / Math.PI.toFloat())
+                            node.rotation = Rotation(x = finalRotX, y = finalRotY, z = finalRotZ)
                         }
                     }
                 }
@@ -201,7 +257,11 @@ fun SceneviewARViewport(
                         .background(if (isArCoreInstalled) GlowGreen else NeonCyan, CircleShape)
                 )
                 Text(
-                    text = if (isArCoreInstalled) " ARCore Tracking (1:1 Metric)" else " Spatial Passthrough (Simulated)",
+                    text = if (isArCoreInstalled) {
+                        if (isAnchored) " AR Anchored (1:1 Metric)" else " AR Scanning Surfaces (Tap to Place)"
+                    } else {
+                        " Spatial Passthrough (Simulated)"
+                    },
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold

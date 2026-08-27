@@ -82,14 +82,13 @@ class ARCoreManager(private val context: Context) {
             isSessionRunning = true
             _trackingStatus.value = "AR Surface Scanner Active"
         } catch (t: Throwable) {
-            // Graceful fallback to embedded high-precision visual-inertial spatial tracking
             isARCoreAvailable = false
             session = null
             isSessionRunning = true
             _trackingStatus.value = "Spatial Sensor Engine Active"
         }
 
-        // Do not generate synthetic fake planes
+        // Real plane detection only - zero synthetic planes
         _trackedPlanes.value = emptyList()
         _pointCloud.value = emptyList()
     }
@@ -309,7 +308,7 @@ class ARCoreManager(private val context: Context) {
             }
         }
 
-        val primary = planes.firstOrNull { it.orientation == PlaneOrientation.HORIZONTAL_UPWARD } ?: planes.first()
-        return Pair(primary, primary.center)
+        // Return null when ray does not intersect any detected physical plane
+        return null
     }
 }

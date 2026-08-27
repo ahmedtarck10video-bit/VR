@@ -223,6 +223,8 @@ fun SpatialMainScreen(
                             scale = uiState.scale * (uiState.surfaceAnchor?.scale ?: 1.0f),
                             panX = uiState.panX,
                             panY = uiState.panY,
+                            surfaceAnchor = uiState.surfaceAnchor,
+                            isAnchored = uiState.arAnchorPlaced,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .pointerInput(Unit) {
