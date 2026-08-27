@@ -83,7 +83,7 @@ fun Object3DScreen(
             model = currentModel,
             rotX = uiState.rotX,
             rotY = uiState.rotY,
-            rotZ = 0f,
+            rotZ = uiState.rotZ,
             scale = uiState.scale,
             panX = uiState.panX,
             panY = uiState.panY,
@@ -93,13 +93,21 @@ fun Object3DScreen(
                 .fillMaxSize()
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, zoom, rotation ->
-                        viewModel.updateRotation(
-                            deltaX = -pan.y * 0.008f,
-                            deltaY = pan.x * 0.008f
-                        )
-                        viewModel.updateScale(zoom)
+                        if (zoom != 1.0f) {
+                            viewModel.updateScale(zoom)
+                        }
+                        if (rotation != 0f) {
+                            viewModel.updateRotation(
+                                deltaX = 0f,
+                                deltaY = 0f,
+                                deltaZ = rotation * 0.02f
+                            )
+                        }
                         if (pan.x != 0f || pan.y != 0f) {
-                            viewModel.updatePan(pan.x, pan.y)
+                            viewModel.updateRotation(
+                                deltaX = -pan.y * 0.008f,
+                                deltaY = pan.x * 0.008f
+                            )
                         }
                     }
                 }

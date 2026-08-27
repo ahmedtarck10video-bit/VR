@@ -87,6 +87,7 @@ data class MRUiState(
     val models: List<Model3D> = emptyList(),
     val rotX: Float = 0.2f,
     val rotY: Float = 0.4f,
+    val rotZ: Float = 0f,
     val scale: Float = 1.0f,
     val panX: Float = 0f,
     val panY: Float = 0f,
@@ -131,7 +132,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
 
     init {
         sensorTracker.start()
-        arCoreManager.start()
+        // Do not start ARCore session prematurely while in Object Mode to save CPU, GPU and RAM
 
         val defaultModels = com.example.math3d.MeshGenerator.getDefaultModels()
         _uiState.value = _uiState.value.copy(
@@ -159,11 +160,13 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             sensorTracker.orientation.collect { orientation ->
                 _uiState.value = _uiState.value.copy(sensorOrientation = orientation)
-                arCoreManager.updateFrame(
-                    pitch = orientation.pitch,
-                    roll = orientation.roll,
-                    yaw = orientation.yaw
-                )
+                if (_uiState.value.currentMode == SpatialMode.AR || _uiState.value.currentMode == SpatialMode.MR) {
+                    arCoreManager.updateFrame(
+                        pitch = orientation.pitch,
+                        roll = orientation.roll,
+                        yaw = orientation.yaw
+                    )
+                }
             }
         }
 
@@ -209,6 +212,9 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(currentMode = mode)
         if (mode == SpatialMode.AR || mode == SpatialMode.MR) {
             arCoreManager.start()
+        } else {
+            // Pure Object 3D Mode: pause ARCore to ensure zero camera/sensor background drain
+            arCoreManager.pause()
         }
     }
 
@@ -472,6 +478,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(
             rotX = 0.15f,
             rotY = 0.35f,
+            rotZ = 0f,
             scale = 1.0f,
             panX = 0f,
             panY = 0f
@@ -485,7 +492,8 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             panY = 0f,
             scale = 1.0f,
             rotX = 0.15f,
-            rotY = 0.35f
+            rotY = 0.35f,
+            rotZ = 0f
         )
         showNotification("Centered Model")
     }
@@ -500,10 +508,11 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    fun updateRotation(deltaX: Float, deltaY: Float) {
+    fun updateRotation(deltaX: Float, deltaY: Float, deltaZ: Float = 0f) {
         _uiState.value = _uiState.value.copy(
             rotX = _uiState.value.rotX + deltaX,
-            rotY = _uiState.value.rotY + deltaY
+            rotY = _uiState.value.rotY + deltaY,
+            rotZ = _uiState.value.rotZ + deltaZ
         )
     }
 

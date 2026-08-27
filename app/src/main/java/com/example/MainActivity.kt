@@ -119,7 +119,7 @@ fun SpatialMainScreen(
                             model = currentModel,
                             rotX = uiState.rotX,
                             rotY = uiState.rotY,
-                            rotZ = 0f,
+                            rotZ = uiState.rotZ,
                             scale = uiState.scale,
                             panX = uiState.panX,
                             panY = uiState.panY,
@@ -128,16 +128,30 @@ fun SpatialMainScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .pointerInput(Unit) {
-                                    detectTransformGestures { _, pan, zoom, _ ->
+                                    detectTapGestures(
+                                        onDoubleTap = {
+                                            viewModel.resetView()
+                                        }
+                                    )
+                                }
+                                .pointerInput(Unit) {
+                                    detectTransformGestures { _, pan, zoom, rotation ->
+                                        if (zoom != 1.0f) {
+                                            viewModel.updateScale(zoom)
+                                        }
+                                        if (rotation != 0f) {
+                                            viewModel.updateRotation(
+                                                deltaX = 0f,
+                                                deltaY = 0f,
+                                                deltaZ = rotation * 0.02f
+                                            )
+                                        }
                                         if (pan.x != 0f || pan.y != 0f) {
+                                            // 1-finger / mouse drag -> 360 orbital rotation X/Y
                                             viewModel.updateRotation(
                                                 deltaX = -pan.y * 0.008f,
                                                 deltaY = pan.x * 0.008f
                                             )
-                                            viewModel.updatePan(pan.x, pan.y)
-                                        }
-                                        if (zoom != 1.0f) {
-                                            viewModel.updateScale(zoom)
                                         }
                                     }
                                 }

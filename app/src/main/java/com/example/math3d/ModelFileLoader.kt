@@ -27,7 +27,8 @@ import kotlin.math.min
  */
 object ModelFileLoader {
 
-    private const val BUFFER_SIZE = 64 * 1024 // 64 KB streaming buffer
+    private const val BUFFER_SIZE = 1024 * 1024 // 1 MB streaming buffer
+    private const val COPY_BUFFER_SIZE = 8 * 1024 * 1024 // 8 MB stream copy buffer for large files
 
     fun loadModelFromUri(context: Context, uri: Uri): Model3D? {
         val rawName = getFileName(context, uri) ?: "Imported 3D Model"
@@ -39,20 +40,33 @@ object ModelFileLoader {
         var cachedFile: java.io.File? = null
         try {
             val modelsDir = java.io.File(context.cacheDir, "spatial_models").apply { mkdirs() }
+            val uriHash = Math.abs(uri.toString().hashCode())
+            val safeCleanName = rawName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
+
             if (isZip) {
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    cachedFile = extractZipAndFindMainModel(stream, modelsDir, rawName)
+                val bundleFolder = java.io.File(modelsDir, "bundle_${uriHash}_${rawName.substringBeforeLast('.')}")
+                if (bundleFolder.exists() && bundleFolder.isDirectory && (bundleFolder.listFiles()?.isNotEmpty() == true)) {
+                    cachedFile = findMainModelInFolder(bundleFolder)
                 }
-            } else {
-                val safeName = "model_${System.currentTimeMillis()}_${rawName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")}"
-                val destFile = java.io.File(modelsDir, safeName)
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    destFile.outputStream().use { output ->
-                        input.copyTo(output)
+                if (cachedFile == null) {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        cachedFile = extractZipAndFindMainModel(stream, bundleFolder, rawName)
                     }
                 }
+            } else {
+                val destFile = java.io.File(modelsDir, "model_${uriHash}_${safeCleanName}")
+                // If file already exists and is non-empty, use existing cached copy directly (zero duplicate copying)
                 if (destFile.exists() && destFile.length() > 0) {
                     cachedFile = destFile
+                } else {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        destFile.outputStream().use { output ->
+                            input.copyTo(output, bufferSize = COPY_BUFFER_SIZE)
+                        }
+                    }
+                    if (destFile.exists() && destFile.length() > 0) {
+                        cachedFile = destFile
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -140,19 +154,26 @@ object ModelFileLoader {
         }
     }
 
+    private fun findMainModelInFolder(folder: java.io.File): java.io.File? {
+        val files = folder.walkTopDown().filter { it.isFile }.toList()
+        return files.firstOrNull { it.name.lowercase().endsWith(".glb") }
+            ?: files.firstOrNull { it.name.lowercase().endsWith(".gltf") }
+            ?: files.firstOrNull { it.name.lowercase().endsWith(".usdz") }
+            ?: files.firstOrNull { it.name.lowercase().endsWith(".obj") }
+            ?: files.firstOrNull { it.name.lowercase().endsWith(".stl") }
+            ?: files.firstOrNull()
+    }
+
     /**
      * Extracts a ZIP / USDZ archive into an isolated folder so glTF relative companion
      * resources (.bin, textures, .png, .jpg) are preserved in place for Filament / Sceneview.
      */
     private fun extractZipAndFindMainModel(
         inputStream: InputStream,
-        targetParentDir: java.io.File,
+        extractFolder: java.io.File,
         archiveName: String
     ): java.io.File? {
-        val extractFolder = java.io.File(
-            targetParentDir,
-            "bundle_${System.currentTimeMillis()}_${archiveName.substringBeforeLast('.')}"
-        ).apply { mkdirs() }
+        extractFolder.mkdirs()
 
         var mainModelFile: java.io.File? = null
         val candidates = mutableListOf<java.io.File>()

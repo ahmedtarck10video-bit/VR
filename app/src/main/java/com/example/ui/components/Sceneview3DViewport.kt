@@ -20,6 +20,7 @@ import java.io.File
 /**
  * High-Performance Hardware Accelerated 3D Viewport powered by Google Filament & Sceneview.
  * Renders full PBR materials, textures, environment lighting, and 60+ FPS hardware rasterization.
+ * Operates purely on GPU without initializing camera previews or background sensor drains.
  */
 @Composable
 fun Sceneview3DViewport(
@@ -34,19 +35,36 @@ fun Sceneview3DViewport(
     autoSpinAngle: Float = 0f,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var currentModelNode by remember { mutableStateOf<ModelNode?>(null) }
+    var sceneViewRef by remember { mutableStateOf<SceneView?>(null) }
     var lastLoadedPath by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                currentModelNode?.let { node ->
+                    sceneViewRef?.removeChildNode(node)
+                    node.destroy()
+                }
+                currentModelNode = null
+                sceneViewRef = null
+            } catch (e: Exception) {
+                // Safe cleanup
+            }
+        }
+    }
 
     AndroidView(
         modifier = modifier.fillMaxSize(),
         factory = { ctx ->
             SceneView(ctx).apply {
                 cameraNode.position = Position(0f, 0f, 4f)
+                sceneViewRef = this
             }
         },
         update = { sceneView ->
+            sceneViewRef = sceneView
             val targetModel = model
             val targetPath = targetModel?.localFilePath ?: targetModel?.fileUri?.toString()
 
@@ -57,6 +75,7 @@ fun Sceneview3DViewport(
                         val filePath = targetModel.localFilePath
                         val file = if (filePath != null) File(filePath) else null
                         
+                        // Filament engine calls must run on the Main/GL thread to prevent unadopted thread panics
                         val instance = if (file != null && file.exists()) {
                             sceneView.modelLoader.createModelInstance(file)
                         } else if (targetModel.fileUri != null) {
@@ -66,7 +85,10 @@ fun Sceneview3DViewport(
                         }
 
                         if (instance != null) {
-                            currentModelNode?.let { sceneView.removeChildNode(it) }
+                            currentModelNode?.let { oldNode ->
+                                sceneView.removeChildNode(oldNode)
+                                oldNode.destroy()
+                            }
                             val metricUnitScale = targetModel.realWorldHeightMeters.coerceIn(0.2f, 2.5f)
                             val newNode = ModelNode(
                                 modelInstance = instance,
@@ -76,7 +98,8 @@ fun Sceneview3DViewport(
                                 this.scale = Scale(scale, scale, scale)
                                 val finalRotY = ((rotY + if (isAutoSpin) autoSpinAngle else 0f) * 180f / Math.PI.toFloat())
                                 val finalRotX = (rotX * 180f / Math.PI.toFloat())
-                                this.rotation = Rotation(x = finalRotX, y = finalRotY, z = rotZ)
+                                val finalRotZ = (rotZ * 180f / Math.PI.toFloat())
+                                this.rotation = Rotation(x = finalRotX, y = finalRotY, z = finalRotZ)
                             }
                             sceneView.addChildNode(newNode)
                             currentModelNode = newNode
@@ -91,7 +114,8 @@ fun Sceneview3DViewport(
                     node.scale = Scale(scale, scale, scale)
                     val finalRotY = ((rotY + if (isAutoSpin) autoSpinAngle else 0f) * 180f / Math.PI.toFloat())
                     val finalRotX = (rotX * 180f / Math.PI.toFloat())
-                    node.rotation = Rotation(x = finalRotX, y = finalRotY, z = rotZ)
+                    val finalRotZ = (rotZ * 180f / Math.PI.toFloat())
+                    node.rotation = Rotation(x = finalRotX, y = finalRotY, z = finalRotZ)
                 }
             }
         }
