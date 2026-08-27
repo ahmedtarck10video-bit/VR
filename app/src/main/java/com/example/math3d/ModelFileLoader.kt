@@ -60,6 +60,25 @@ object ModelFileLoader {
         }
 
         val finalCachedFile = cachedFile
+        val finalFilePath = finalCachedFile?.absolutePath
+        val parsedTargetName = finalCachedFile?.name ?: rawName
+
+        // Fast path for native GLB / GLTF / USDZ / ZIP packages:
+        // Pass directly to SceneView / Filament ModelLoader without CPU triangle conversion!
+        if (isGlbOrGltf && finalFilePath != null && java.io.File(finalFilePath).exists()) {
+            return Model3D(
+                name = displayName,
+                description = "Hardware Accelerated 3D PBR Model (${getFileFormatLabel(parsedTargetName)})",
+                triangles = emptyList(),
+                fileUri = uri,
+                localFilePath = finalFilePath,
+                isGlbOrGltf = true,
+                realWorldWidthMeters = 0.5f,
+                realWorldHeightMeters = 0.5f,
+                realWorldDepthMeters = 0.5f
+            )
+        }
+
         return try {
             val inputStream = if (finalCachedFile != null && finalCachedFile.exists()) {
                 finalCachedFile.inputStream()
@@ -67,8 +86,6 @@ object ModelFileLoader {
                 context.contentResolver.openInputStream(uri) ?: return null
             }
             val bufferedStream = BufferedInputStream(inputStream, BUFFER_SIZE)
-
-            val parsedTargetName = finalCachedFile?.name ?: rawName
             val triangles = parseStream(bufferedStream, parsedTargetName)
             
             // Calculate real-world metric dimensions
@@ -92,24 +109,24 @@ object ModelFileLoader {
             val normalized = if (triangles.isNotEmpty()) normalizeAndCenterMesh(triangles) else emptyList()
 
             // If non-GLB format (e.g. OBJ/STL/PLY) was parsed, convert to standard binary GLB so Filament loads it directly
-            var finalFilePath = finalCachedFile?.absolutePath
-            if (finalFilePath == null || (!finalFilePath.lowercase().endsWith(".glb") && !finalFilePath.lowercase().endsWith(".gltf"))) {
+            var glbFilePath = finalFilePath
+            if (glbFilePath == null || (!glbFilePath.lowercase().endsWith(".glb") && !glbFilePath.lowercase().endsWith(".gltf"))) {
                 if (normalized.isNotEmpty()) {
                     val exportedGlb = exportTrianglesToGlbFile(context, parsedTargetName, normalized)
                     if (exportedGlb != null) {
-                        finalFilePath = exportedGlb
+                        glbFilePath = exportedGlb
                     }
                 }
             }
 
-            if (triangles.isNotEmpty() || isGlbOrGltf || (finalFilePath != null && java.io.File(finalFilePath).exists())) {
+            if (triangles.isNotEmpty() || (glbFilePath != null && java.io.File(glbFilePath).exists())) {
                 Model3D(
                     name = displayName,
                     description = if (triangles.isNotEmpty()) "${normalized.size} polygons loaded (${getFileFormatLabel(parsedTargetName)})" else "Hardware Accelerated 3D Model (${getFileFormatLabel(parsedTargetName)})",
                     triangles = normalized,
                     fileUri = uri,
-                    localFilePath = finalFilePath,
-                    isGlbOrGltf = isGlbOrGltf,
+                    localFilePath = glbFilePath,
+                    isGlbOrGltf = true,
                     realWorldWidthMeters = realW,
                     realWorldHeightMeters = realH,
                     realWorldDepthMeters = realD

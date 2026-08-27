@@ -39,9 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.engine.Renderer3D
 import com.example.engine.ar.ARPlaneFilter
-import com.example.engine.ar.ARPlaneRenderer
 import com.example.ui.components.CameraPreview
 import com.example.ui.components.Sceneview3DViewport
 import com.example.ui.components.SceneviewARViewport
@@ -98,9 +96,6 @@ fun SpatialMainScreen(
         }
     }
 
-    val renderer = remember { Renderer3D() }
-    val arPlaneRenderer = remember { ARPlaneRenderer() }
-    val textMeasurer = rememberTextMeasurer()
     val currentModel = uiState.currentModel
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0F172A))) {
@@ -311,46 +306,30 @@ fun SpatialMainScreen(
                                 },
                             leftOverlay = {
                                 if (currentModel != null) {
-                                    Canvas(modifier = Modifier.fillMaxSize()) {
-                                        renderer.render(
-                                            drawScope = this,
-                                            model = currentModel,
-                                            rotX = uiState.rotX + gyroPitch,
-                                            rotY = uiState.rotY + gyroRoll - (uiState.ipdDistance * 0.35f),
-                                            rotZ = gyroYaw * 0.4f,
-                                            scale = uiState.scale * 0.85f,
-                                            panX = uiState.panX - 25f,
-                                            panY = uiState.panY - (gyroPitch * 150f),
-                                            wireframe = false,
-                                            primaryColor = uiState.modelColor,
-                                            drawShadow = false,
-                                            drawFloorGrid = false,
-                                            hdriPreset = uiState.hdriPreset,
-                                            engineProfile = uiState.renderEngineProfile
-                                        )
-                                    }
+                                    Sceneview3DViewport(
+                                        model = currentModel,
+                                        rotX = uiState.rotX + gyroPitch,
+                                        rotY = uiState.rotY + gyroRoll - (uiState.ipdDistance * 0.35f),
+                                        rotZ = gyroYaw * 0.4f,
+                                        scale = uiState.scale * 0.85f,
+                                        panX = uiState.panX - 25f,
+                                        panY = uiState.panY - (gyroPitch * 150f),
+                                        modifier = Modifier.fillMaxSize()
+                                    )
                                 }
                             },
                             rightOverlay = {
                                 if (currentModel != null) {
-                                    Canvas(modifier = Modifier.fillMaxSize()) {
-                                        renderer.render(
-                                            drawScope = this,
-                                            model = currentModel,
-                                            rotX = uiState.rotX + gyroPitch,
-                                            rotY = uiState.rotY + gyroRoll + (uiState.ipdDistance * 0.35f),
-                                            rotZ = gyroYaw * 0.4f,
-                                            scale = uiState.scale * 0.85f,
-                                            panX = uiState.panX + 25f,
-                                            panY = uiState.panY - (gyroPitch * 150f),
-                                            wireframe = false,
-                                            primaryColor = uiState.modelColor,
-                                            drawShadow = false,
-                                            drawFloorGrid = false,
-                                            hdriPreset = uiState.hdriPreset,
-                                            engineProfile = uiState.renderEngineProfile
-                                        )
-                                    }
+                                    Sceneview3DViewport(
+                                        model = currentModel,
+                                        rotX = uiState.rotX + gyroPitch,
+                                        rotY = uiState.rotY + gyroRoll + (uiState.ipdDistance * 0.35f),
+                                        rotZ = gyroYaw * 0.4f,
+                                        scale = uiState.scale * 0.85f,
+                                        panX = uiState.panX + 25f,
+                                        panY = uiState.panY - (gyroPitch * 150f),
+                                        modifier = Modifier.fillMaxSize()
+                                    )
                                 }
                             }
                         )

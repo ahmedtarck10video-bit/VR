@@ -337,7 +337,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             val model = withContext(Dispatchers.IO) {
                 ModelFileLoader.loadModelFromUri(context, uri)
             }
-            if (model != null && model.triangles.isNotEmpty()) {
+            if (model != null && (model.triangles.isNotEmpty() || model.isGlbOrGltf || model.localFilePath != null)) {
                 val updatedModels = listOf(model) + _uiState.value.models.filter { it.name != model.name }
                 _uiState.value = _uiState.value.copy(
                     currentModel = model,
@@ -351,7 +351,8 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
                     panX = 0f,
                     panY = 0f
                 )
-                showNotification("Loaded: ${model.name} (${model.triangles.size} polygons)")
+                val polyLabel = if (model.triangles.isNotEmpty()) "${model.triangles.size} polygons" else "PBR GPU Asset"
+                showNotification("Loaded: ${model.name} ($polyLabel)")
             } else {
                 _uiState.value = _uiState.value.copy(isLoadingModel = false)
                 showNotification("Could not parse 3D model. Supported: .glb, .gltf, .usdz, .obj, .stl")

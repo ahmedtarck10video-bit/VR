@@ -67,9 +67,10 @@ fun Sceneview3DViewport(
 
                         if (instance != null) {
                             currentModelNode?.let { sceneView.removeChildNode(it) }
+                            val metricUnitScale = targetModel.realWorldHeightMeters.coerceIn(0.2f, 2.5f)
                             val newNode = ModelNode(
                                 modelInstance = instance,
-                                scaleToUnits = 2.0f
+                                scaleToUnits = metricUnitScale
                             ).apply {
                                 this.position = Position(x = panX * 0.005f, y = -panY * 0.005f, z = 0f)
                                 this.scale = Scale(scale, scale, scale)
