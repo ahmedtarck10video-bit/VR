@@ -43,6 +43,8 @@ import com.example.engine.Renderer3D
 import com.example.engine.ar.ARPlaneFilter
 import com.example.engine.ar.ARPlaneRenderer
 import com.example.ui.components.CameraPreview
+import com.example.ui.components.Sceneview3DViewport
+import com.example.ui.components.SceneviewARViewport
 import com.example.ui.components.StereoDualCameraPreview
 import com.example.ui.theme.MixedRealityTheme
 import com.example.viewmodel.MRUiState
@@ -111,43 +113,77 @@ fun SpatialMainScreen(
                         .background(
                             Brush.verticalGradient(
                                 listOf(
-                                    Color(0xFFF6F8FA),
-                                    Color(0xFFECEFF1)
+                                    Color(0xFF0B1120),
+                                    Color(0xFF0F172A)
                                 )
                             )
                         )
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                if (pan.x != 0f || pan.y != 0f) {
-                                    viewModel.updateRotation(
-                                        deltaX = -pan.y * 0.008f,
-                                        deltaY = pan.x * 0.008f
-                                    )
-                                }
-                                if (zoom != 1.0f) {
-                                    viewModel.updateScale(zoom)
-                                }
-                            }
-                        }
                 ) {
                     if (currentModel != null) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            renderer.render(
-                                drawScope = this,
+                        if (currentModel.localFilePath != null || currentModel.fileUri != null) {
+                            Sceneview3DViewport(
                                 model = currentModel,
                                 rotX = uiState.rotX,
                                 rotY = uiState.rotY,
                                 rotZ = 0f,
                                 scale = uiState.scale,
-                                panX = 0f,
-                                panY = 0f,
-                                wireframe = uiState.isWireframe,
-                                primaryColor = uiState.modelColor,
-                                drawShadow = false,
-                                drawFloorGrid = false,
-                                hdriPreset = uiState.hdriPreset,
-                                engineProfile = uiState.renderEngineProfile
+                                panX = uiState.panX,
+                                panY = uiState.panY,
+                                isAutoSpin = uiState.isAutoSpin,
+                                autoSpinAngle = 0f,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) {
+                                        detectTransformGestures { _, pan, zoom, _ ->
+                                            if (pan.x != 0f || pan.y != 0f) {
+                                                viewModel.updateRotation(
+                                                    deltaX = -pan.y * 0.008f,
+                                                    deltaY = pan.x * 0.008f
+                                                )
+                                                viewModel.updatePan(pan.x, pan.y)
+                                            }
+                                            if (zoom != 1.0f) {
+                                                viewModel.updateScale(zoom)
+                                            }
+                                        }
+                                    }
                             )
+                        } else {
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) {
+                                        detectTransformGestures { _, pan, zoom, _ ->
+                                            if (pan.x != 0f || pan.y != 0f) {
+                                                viewModel.updateRotation(
+                                                    deltaX = -pan.y * 0.008f,
+                                                    deltaY = pan.x * 0.008f
+                                                )
+                                                viewModel.updatePan(pan.x, pan.y)
+                                            }
+                                            if (zoom != 1.0f) {
+                                                viewModel.updateScale(zoom)
+                                            }
+                                        }
+                                    }
+                            ) {
+                                renderer.render(
+                                    drawScope = this,
+                                    model = currentModel,
+                                    rotX = uiState.rotX,
+                                    rotY = uiState.rotY,
+                                    rotZ = 0f,
+                                    scale = uiState.scale,
+                                    panX = uiState.panX,
+                                    panY = uiState.panY,
+                                    wireframe = uiState.isWireframe,
+                                    primaryColor = uiState.modelColor,
+                                    drawShadow = true,
+                                    drawFloorGrid = true,
+                                    hdriPreset = uiState.hdriPreset,
+                                    engineProfile = uiState.renderEngineProfile
+                                )
+                            }
                         }
                     } else {
                         // Empty State Prompt
@@ -208,73 +244,112 @@ fun SpatialMainScreen(
                         .background(Color.Black)
                 ) {
                     if (hasCameraPermission) {
-                        // Direct Camera Stream
-                        CameraPreview(modifier = Modifier.fillMaxSize())
-
-                        // Interactive AR Plane Detection & 3D Model Canvas
-                        Canvas(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onTap = { offset ->
-                                            val normX = offset.x / size.width.toFloat()
-                                            val normY = offset.y / size.height.toFloat()
-                                            viewModel.onSurfaceTapped(normX, normY)
-                                        },
-                                        onDoubleTap = {
-                                            viewModel.resetPosition()
-                                        }
-                                    )
-                                }
-                                .pointerInput(Unit) {
-                                    detectTransformGestures { _, pan, zoom, rotation ->
-                                        if (pan.x != 0f || pan.y != 0f) {
-                                            viewModel.updatePan(pan.x, pan.y)
-                                        }
-                                        if (zoom != 1.0f) {
-                                            viewModel.updateScale(zoom)
-                                        }
-                                        if (rotation != 0f) {
-                                            viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
+                        if (currentModel?.localFilePath != null || currentModel?.fileUri != null) {
+                            SceneviewARViewport(
+                                model = currentModel,
+                                rotX = uiState.rotX + gyroPitch,
+                                rotY = uiState.rotY + gyroRoll + (uiState.surfaceAnchor?.rotationY ?: 0f),
+                                rotZ = 0f,
+                                scale = uiState.scale * (uiState.surfaceAnchor?.scale ?: 1.0f),
+                                panX = uiState.panX,
+                                panY = uiState.panY,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = { offset ->
+                                                val normX = offset.x / size.width.toFloat()
+                                                val normY = offset.y / size.height.toFloat()
+                                                viewModel.onSurfaceTapped(normX, normY)
+                                            },
+                                            onDoubleTap = {
+                                                viewModel.resetPosition()
+                                            }
+                                        )
+                                    }
+                                    .pointerInput(Unit) {
+                                        detectTransformGestures { _, pan, zoom, rotation ->
+                                            if (pan.x != 0f || pan.y != 0f) {
+                                                viewModel.updatePan(pan.x, pan.y)
+                                            }
+                                            if (zoom != 1.0f) {
+                                                viewModel.updateScale(zoom)
+                                            }
+                                            if (rotation != 0f) {
+                                                viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
+                                            }
                                         }
                                     }
-                                }
-                        ) {
-                            // 1. Render ARCore Detected Planes, Meshes, and Point Cloud
-                            arPlaneRenderer.renderPlanes(
-                                drawScope = this,
-                                planes = uiState.detectedPlanes,
-                                pointCloud = uiState.pointCloud,
-                                anchor = uiState.surfaceAnchor,
-                                isPlaneMeshVisible = uiState.isPlaneMeshVisible,
-                                isPointCloudVisible = uiState.isPointCloudVisible,
-                                selectedPlaneId = uiState.selectedPlaneId,
-                                filter = uiState.planeFilter,
-                                textMeasurer = textMeasurer
                             )
+                        } else {
+                            // Direct Camera Stream
+                            CameraPreview(modifier = Modifier.fillMaxSize())
 
-                            // 2. Render 3D Model Anchored to Physical Surface
-                            if (currentModel != null) {
-                                val anchor = uiState.surfaceAnchor
-                                val basePanY = if (anchor != null) 120f else 0f
-
-                                renderer.render(
+                            // Interactive AR Plane Detection & 3D Model Canvas
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = { offset ->
+                                                val normX = offset.x / size.width.toFloat()
+                                                val normY = offset.y / size.height.toFloat()
+                                                viewModel.onSurfaceTapped(normX, normY)
+                                            },
+                                            onDoubleTap = {
+                                                viewModel.resetPosition()
+                                            }
+                                        )
+                                    }
+                                    .pointerInput(Unit) {
+                                        detectTransformGestures { _, pan, zoom, rotation ->
+                                            if (pan.x != 0f || pan.y != 0f) {
+                                                viewModel.updatePan(pan.x, pan.y)
+                                            }
+                                            if (zoom != 1.0f) {
+                                                viewModel.updateScale(zoom)
+                                            }
+                                            if (rotation != 0f) {
+                                                viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
+                                            }
+                                        }
+                                    }
+                            ) {
+                                // 1. Render ARCore Detected Planes, Meshes, and Point Cloud
+                                arPlaneRenderer.renderPlanes(
                                     drawScope = this,
-                                    model = currentModel,
-                                    rotX = uiState.rotX + gyroPitch,
-                                    rotY = uiState.rotY + gyroRoll + (anchor?.rotationY ?: 0f),
-                                    rotZ = gyroYaw * 0.4f,
-                                    scale = uiState.scale * (anchor?.scale ?: 1.0f),
-                                    panX = uiState.panX + (gyroRoll * 180f),
-                                    panY = uiState.panY + basePanY - (gyroPitch * 180f),
-                                    wireframe = uiState.isWireframe,
-                                    primaryColor = uiState.modelColor,
-                                    drawShadow = true, // Grounded drop shadow on physical surface
-                                    drawFloorGrid = false,
-                                    hdriPreset = uiState.hdriPreset,
-                                    engineProfile = uiState.renderEngineProfile
+                                    planes = uiState.detectedPlanes,
+                                    pointCloud = uiState.pointCloud,
+                                    anchor = uiState.surfaceAnchor,
+                                    isPlaneMeshVisible = uiState.isPlaneMeshVisible,
+                                    isPointCloudVisible = uiState.isPointCloudVisible,
+                                    selectedPlaneId = uiState.selectedPlaneId,
+                                    filter = uiState.planeFilter,
+                                    textMeasurer = textMeasurer
                                 )
+
+                                // 2. Render 3D Model Anchored to Physical Surface
+                                if (currentModel != null) {
+                                    val anchor = uiState.surfaceAnchor
+                                    val basePanY = if (anchor != null) 120f else 0f
+
+                                    renderer.render(
+                                        drawScope = this,
+                                        model = currentModel,
+                                        rotX = uiState.rotX + gyroPitch,
+                                        rotY = uiState.rotY + gyroRoll + (anchor?.rotationY ?: 0f),
+                                        rotZ = gyroYaw * 0.4f,
+                                        scale = uiState.scale * (anchor?.scale ?: 1.0f),
+                                        panX = uiState.panX + (gyroRoll * 180f),
+                                        panY = uiState.panY + basePanY - (gyroPitch * 180f),
+                                        wireframe = uiState.isWireframe,
+                                        primaryColor = uiState.modelColor,
+                                        drawShadow = true, // Grounded drop shadow on physical surface
+                                        drawFloorGrid = false,
+                                        hdriPreset = uiState.hdriPreset,
+                                        engineProfile = uiState.renderEngineProfile
+                                    )
+                                }
                             }
                         }
                     } else {

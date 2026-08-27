@@ -133,9 +133,10 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         sensorTracker.start()
         arCoreManager.start()
 
+        val defaultModels = com.example.math3d.MeshGenerator.getDefaultModels()
         _uiState.value = _uiState.value.copy(
-            models = emptyList(),
-            currentModel = null,
+            models = defaultModels,
+            currentModel = defaultModels.firstOrNull(),
             selectedModelIndex = 0
         )
 
