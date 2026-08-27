@@ -111,8 +111,8 @@ data class MRUiState(
     val detectedPlanes: List<ARTrackedPlane> = emptyList(),
     val pointCloud: List<Vec3> = emptyList(),
     val surfaceAnchor: ARSurfaceAnchor? = null,
-    val isPlaneMeshVisible: Boolean = true,
-    val isPointCloudVisible: Boolean = true,
+    val isPlaneMeshVisible: Boolean = false,
+    val isPointCloudVisible: Boolean = false,
     val planeFilter: ARPlaneFilter = ARPlaneFilter.ALL,
     val placementMode: ARPlacementMode = ARPlacementMode.TAP_TO_PLACE,
     val selectedPlaneId: String? = null,
@@ -139,6 +139,21 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             currentModel = defaultModels.firstOrNull(),
             selectedModelIndex = 0
         )
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val enriched = defaultModels.map { m ->
+                val path = com.example.math3d.ModelFileLoader.exportTrianglesToGlbFile(
+                    application,
+                    m.name,
+                    m.triangles
+                )
+                m.copy(localFilePath = path, isGlbOrGltf = true)
+            }
+            _uiState.value = _uiState.value.copy(
+                models = enriched,
+                currentModel = enriched.getOrNull(_uiState.value.selectedModelIndex) ?: enriched.firstOrNull()
+            )
+        }
 
         // Observe sensors and update AR tracking
         viewModelScope.launch {

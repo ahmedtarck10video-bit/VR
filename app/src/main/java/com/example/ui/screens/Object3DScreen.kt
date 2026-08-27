@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,7 +31,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.engine.Renderer3D
 import com.example.ui.components.GlassCard
 import com.example.ui.components.Sceneview3DViewport
 import com.example.ui.theme.NeonCyan
@@ -45,7 +43,6 @@ fun Object3DScreen(
     viewModel: MixedRealityViewModel,
     modifier: Modifier = Modifier
 ) {
-    val renderer = remember { Renderer3D() }
     val currentModel = uiState.models.getOrNull(uiState.selectedModelIndex) ?: return
 
     val infiniteTransition = rememberInfiniteTransition(label = "spin")
@@ -81,69 +78,32 @@ fun Object3DScreen(
                 )
             )
     ) {
-        if (currentModel.localFilePath != null || currentModel.fileUri != null) {
-            // Hardware-Accelerated 3D PBR Engine (Sceneview + Filament)
-            Sceneview3DViewport(
-                model = currentModel,
-                rotX = uiState.rotX,
-                rotY = uiState.rotY,
-                rotZ = 0f,
-                scale = uiState.scale,
-                panX = uiState.panX,
-                panY = uiState.panY,
-                isAutoSpin = uiState.isAutoSpin,
-                autoSpinAngle = spinAngle,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, rotation ->
-                            viewModel.updateRotation(
-                                deltaX = -pan.y * 0.008f,
-                                deltaY = pan.x * 0.008f
-                            )
-                            viewModel.updateScale(zoom)
-                            if (pan.x != 0f || pan.y != 0f) {
-                                viewModel.updatePan(pan.x, pan.y)
-                            }
+        // Unified Hardware-Accelerated 3D PBR Engine (Sceneview + Filament)
+        Sceneview3DViewport(
+            model = currentModel,
+            rotX = uiState.rotX,
+            rotY = uiState.rotY,
+            rotZ = 0f,
+            scale = uiState.scale,
+            panX = uiState.panX,
+            panY = uiState.panY,
+            isAutoSpin = uiState.isAutoSpin,
+            autoSpinAngle = spinAngle,
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, rotation ->
+                        viewModel.updateRotation(
+                            deltaX = -pan.y * 0.008f,
+                            deltaY = pan.x * 0.008f
+                        )
+                        viewModel.updateScale(zoom)
+                        if (pan.x != 0f || pan.y != 0f) {
+                            viewModel.updatePan(pan.x, pan.y)
                         }
                     }
-            )
-        } else {
-            // Procedural Solid Mesh Renderer
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, rotation ->
-                            viewModel.updateRotation(
-                                deltaX = -pan.y * 0.008f,
-                                deltaY = pan.x * 0.008f
-                            )
-                            viewModel.updateScale(zoom)
-                            if (pan.x != 0f || pan.y != 0f) {
-                                viewModel.updatePan(pan.x, pan.y)
-                            }
-                        }
-                    }
-            ) {
-                renderer.render(
-                    drawScope = this,
-                    model = currentModel,
-                    rotX = uiState.rotX,
-                    rotY = uiState.rotY + if (uiState.isAutoSpin) spinAngle else 0f,
-                    rotZ = 0f,
-                    scale = uiState.scale,
-                    panX = uiState.panX,
-                    panY = uiState.panY,
-                    wireframe = uiState.isWireframe,
-                    primaryColor = uiState.modelColor,
-                    drawShadow = true,
-                    drawFloorGrid = false,
-                    hdriPreset = uiState.hdriPreset,
-                    engineProfile = uiState.renderEngineProfile
-                )
-            }
-        }
+                }
+        )
 
         // Top Model Info Glass Card
         GlassCard(

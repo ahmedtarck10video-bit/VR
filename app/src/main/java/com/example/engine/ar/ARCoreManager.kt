@@ -44,8 +44,17 @@ class ARCoreManager(private val context: Context) {
 
     private fun checkAvailability() {
         try {
-            val availability = ArCoreApk.getInstance().checkAvailability(context)
-            isARCoreAvailable = availability.isSupported
+            val pInfo = try {
+                context.packageManager.getPackageInfo("com.google.ar.core", 0)
+            } catch (e: Exception) {
+                null
+            }
+            if (pInfo != null) {
+                val availability = ArCoreApk.getInstance().checkAvailability(context)
+                isARCoreAvailable = (availability == ArCoreApk.Availability.SUPPORTED_INSTALLED)
+            } else {
+                isARCoreAvailable = false
+            }
             _trackingStatus.value = if (isARCoreAvailable) "AR Spatial Engine Ready" else "Spatial Sensor Engine Active"
         } catch (t: Throwable) {
             isARCoreAvailable = false
@@ -79,8 +88,9 @@ class ARCoreManager(private val context: Context) {
             _trackingStatus.value = "Spatial Sensor Engine Active"
         }
 
-        // Initialize default ground planes if needed
-        generateDynamicPlanes(pitch = 0f, roll = 0f, yaw = 0f)
+        // Do not generate synthetic fake planes
+        _trackedPlanes.value = emptyList()
+        _pointCloud.value = emptyList()
     }
 
     fun pause() {
@@ -122,8 +132,9 @@ class ARCoreManager(private val context: Context) {
             }
         }
 
-        // Hybrid Visual-Inertial Plane Detection Fallback
-        generateDynamicPlanes(pitch, roll, yaw)
+        // No synthetic planes
+        _trackedPlanes.value = emptyList()
+        _pointCloud.value = emptyList()
     }
 
     private fun processARCoreFrame(frame: Frame) {
@@ -213,89 +224,8 @@ class ARCoreManager(private val context: Context) {
         _trackingStatus.value = if (count > 0) {
             "ARCore Tracking $count Physical Surface${if (count > 1) "s" else ""}"
         } else {
-            "Scanning Floor & Tables..."
+            "AR Spatial Scanner Ready"
         }
-    }
-
-    /**
-     * Synthesizes physical planes and feature points based on IMU gravity alignment,
-     * allowing rock-solid floor and table detection even when ARCore service is unavailable.
-     */
-    private fun generateDynamicPlanes(pitch: Float, roll: Float, yaw: Float) {
-        val pulse = sin(fallbackTimeSec * 2f) * 0.05f
-
-        // 1. Primary Floor Plane (Horizontal Upward)
-        val floorCenter = Vec3(0f + roll * 0.5f, -0.75f, 2.6f - pitch * 0.5f)
-        val floorExtentX = 3.2f + pulse
-        val floorExtentZ = 3.8f + pulse
-        val floorPolygon = createDefaultPolygon(floorCenter, floorExtentX, floorExtentZ)
-
-        val floorPlane = ARTrackedPlane(
-            id = "plane_ground_floor",
-            center = floorCenter,
-            normal = Vec3(0f, 1f, 0f),
-            extentX = floorExtentX,
-            extentZ = floorExtentZ,
-            polygon = floorPolygon,
-            orientation = PlaneOrientation.HORIZONTAL_UPWARD
-        )
-
-        // 2. Desk / Coffee Table Plane (Horizontal Upward, closer & elevated)
-        val tableCenter = Vec3(0.65f, -0.25f, 1.8f)
-        val tableExtentX = 1.4f
-        val tableExtentZ = 1.1f
-        val tablePolygon = createDefaultPolygon(tableCenter, tableExtentX, tableExtentZ)
-
-        val tablePlane = ARTrackedPlane(
-            id = "plane_desk_table",
-            center = tableCenter,
-            normal = Vec3(0f, 1f, 0f),
-            extentX = tableExtentX,
-            extentZ = tableExtentZ,
-            polygon = tablePolygon,
-            orientation = PlaneOrientation.HORIZONTAL_UPWARD
-        )
-
-        // 3. Background Wall Plane (Vertical)
-        val wallCenter = Vec3(0f, 0.4f, 4.2f)
-        val wallExtentX = 4.0f
-        val wallExtentZ = 2.5f
-        val wallPolygon = listOf(
-            Vec3(wallCenter.x - wallExtentX / 2, wallCenter.y - wallExtentZ / 2, wallCenter.z),
-            Vec3(wallCenter.x + wallExtentX / 2, wallCenter.y - wallExtentZ / 2, wallCenter.z),
-            Vec3(wallCenter.x + wallExtentX / 2, wallCenter.y + wallExtentZ / 2, wallCenter.z),
-            Vec3(wallCenter.x - wallExtentX / 2, wallCenter.y + wallExtentZ / 2, wallCenter.z)
-        )
-
-        val wallPlane = ARTrackedPlane(
-            id = "plane_vertical_wall",
-            center = wallCenter,
-            normal = Vec3(0f, 0f, -1f),
-            extentX = wallExtentX,
-            extentZ = wallExtentZ,
-            polygon = wallPolygon,
-            orientation = PlaneOrientation.VERTICAL
-        )
-
-        _trackedPlanes.value = listOf(floorPlane, tablePlane, wallPlane)
-
-        // Generate dynamic 3D feature points on surfaces
-        val syntheticPoints = mutableListOf<Vec3>()
-        for (i in -3..3) {
-            for (j in -3..3) {
-                val noiseX = sin(i * 1.7f + fallbackTimeSec) * 0.15f
-                val noiseZ = cos(j * 2.1f + fallbackTimeSec) * 0.15f
-                syntheticPoints.add(
-                    Vec3(
-                        floorCenter.x + (i * 0.45f) + noiseX,
-                        floorCenter.y + (sin((i + j + fallbackTimeSec).toDouble()).toFloat() * 0.015f),
-                        floorCenter.z + (j * 0.5f) + noiseZ
-                    )
-                )
-            }
-        }
-        _pointCloud.value = syntheticPoints
-        _trackingStatus.value = "AR Surface Tracked (3 Planes Active)"
     }
 
     private fun createDefaultPolygon(center: Vec3, extentX: Float, extentZ: Float): List<Vec3> {

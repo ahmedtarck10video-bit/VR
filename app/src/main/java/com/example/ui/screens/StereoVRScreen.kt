@@ -24,8 +24,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.example.engine.Renderer3D
 import com.example.ui.components.CameraPreview
+import com.example.ui.components.Sceneview3DViewport
 import com.example.ui.components.StereoDualCameraPreview
 import com.example.ui.components.GlassCard
 import com.example.ui.theme.NeonCyan
@@ -54,7 +54,6 @@ fun StereoVRScreen(
         hasCameraPermission = isGranted
     }
 
-    val renderer = remember { Renderer3D() }
     val currentModel = uiState.models.getOrNull(uiState.selectedModelIndex) ?: return
 
     val headPitch = uiState.sensorOrientation.pitch * 0.02f
@@ -84,24 +83,16 @@ fun StereoVRScreen(
                         }
                     },
                 leftOverlay = {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        renderer.render(
-                            drawScope = this,
-                            model = currentModel,
-                            rotX = uiState.rotX + headPitch,
-                            rotY = uiState.rotY + headRoll - (uiState.ipdDistance * 0.4f),
-                            rotZ = 0f,
-                            scale = uiState.scale * 0.85f,
-                            panX = uiState.panX - 20f,
-                            panY = uiState.panY,
-                            wireframe = uiState.isWireframe,
-                            primaryColor = uiState.modelColor,
-                            drawShadow = true,
-                            drawFloorGrid = true,
-                            hdriPreset = uiState.hdriPreset,
-                            engineProfile = uiState.renderEngineProfile
-                        )
-                    }
+                    Sceneview3DViewport(
+                        model = currentModel,
+                        rotX = uiState.rotX + headPitch,
+                        rotY = uiState.rotY + headRoll - (uiState.ipdDistance * 0.4f),
+                        rotZ = 0f,
+                        scale = uiState.scale * 0.85f,
+                        panX = uiState.panX - 20f,
+                        panY = uiState.panY,
+                        modifier = Modifier.fillMaxSize()
+                    )
                     Text(
                         text = "L Eye [MR Stereo]",
                         color = NeonCyan.copy(alpha = 0.7f),
@@ -111,24 +102,16 @@ fun StereoVRScreen(
                     )
                 },
                 rightOverlay = {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        renderer.render(
-                            drawScope = this,
-                            model = currentModel,
-                            rotX = uiState.rotX + headPitch,
-                            rotY = uiState.rotY + headRoll + (uiState.ipdDistance * 0.4f),
-                            rotZ = 0f,
-                            scale = uiState.scale * 0.85f,
-                            panX = uiState.panX + 20f,
-                            panY = uiState.panY,
-                            wireframe = uiState.isWireframe,
-                            primaryColor = uiState.modelColor,
-                            drawShadow = true,
-                            drawFloorGrid = true,
-                            hdriPreset = uiState.hdriPreset,
-                            engineProfile = uiState.renderEngineProfile
-                        )
-                    }
+                    Sceneview3DViewport(
+                        model = currentModel,
+                        rotX = uiState.rotX + headPitch,
+                        rotY = uiState.rotY + headRoll + (uiState.ipdDistance * 0.4f),
+                        rotZ = 0f,
+                        scale = uiState.scale * 0.85f,
+                        panX = uiState.panX + 20f,
+                        panY = uiState.panY,
+                        modifier = Modifier.fillMaxSize()
+                    )
                     Text(
                         text = "R Eye [MR Stereo]",
                         color = NeonCyan.copy(alpha = 0.7f),

@@ -236,10 +236,8 @@ class Renderer3D {
             )
         }
 
-        // =========================================================================
-        // REALISTIC MULTI-LAYERED SHADOWS (Ground Contact + Cast Shadow + Soft AO)
-        // =========================================================================
-        if (drawShadow) {
+        // Shadows under model disabled as requested
+        if (false && drawShadow) {
             val groundYOffset = if (modelMinY != Float.MAX_VALUE) {
                 centerY - (modelMinY / distance) * fov + 8f * scale
             } else {

@@ -23,14 +23,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.example.engine.Renderer3D
-import com.example.engine.ar.ARPlaneFilter
-import com.example.engine.ar.ARPlaneRenderer
-import com.example.ui.components.CameraPreview
 import com.example.ui.components.SceneviewARViewport
 import com.example.viewmodel.MRUiState
 import com.example.viewmodel.MixedRealityViewModel
@@ -57,9 +52,6 @@ fun ARScreen(
         hasCameraPermission = isGranted
     }
 
-    val renderer = remember { Renderer3D() }
-    val arPlaneRenderer = remember { ARPlaneRenderer() }
-    val textMeasurer = rememberTextMeasurer()
     val currentModel = uiState.models.getOrNull(uiState.selectedModelIndex)
 
     val gyroPitch = uiState.sensorOrientation.pitch * 0.015f
@@ -67,113 +59,43 @@ fun ARScreen(
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         if (hasCameraPermission) {
-            if (currentModel?.localFilePath != null || currentModel?.fileUri != null) {
-                // Hardware-Accelerated AR Mode with Google ARCore & Filament
-                SceneviewARViewport(
-                    model = currentModel,
-                    rotX = uiState.rotX + gyroPitch,
-                    rotY = uiState.rotY + gyroRoll + (uiState.surfaceAnchor?.rotationY ?: 0f),
-                    rotZ = 0f,
-                    scale = uiState.scale * (uiState.surfaceAnchor?.scale ?: 1.0f),
-                    panX = uiState.panX,
-                    panY = uiState.panY,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = { offset ->
-                                    val normX = offset.x / size.width.toFloat()
-                                    val normY = offset.y / size.height.toFloat()
-                                    viewModel.onSurfaceTapped(normX, normY)
-                                },
-                                onDoubleTap = {
-                                    viewModel.resetPosition()
-                                }
-                            )
-                        }
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, rotation ->
-                                if (pan.x != 0f || pan.y != 0f) {
-                                    viewModel.updatePan(pan.x, pan.y)
-                                }
-                                if (zoom != 1.0f) {
-                                    viewModel.updateScale(zoom)
-                                }
-                                if (rotation != 0f) {
-                                    viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
-                                }
+            // Unified Hardware-Accelerated AR Mode with Google ARCore & Filament
+            SceneviewARViewport(
+                model = currentModel,
+                rotX = uiState.rotX + gyroPitch,
+                rotY = uiState.rotY + gyroRoll + (uiState.surfaceAnchor?.rotationY ?: 0f),
+                rotZ = 0f,
+                scale = uiState.scale * (uiState.surfaceAnchor?.scale ?: 1.0f),
+                panX = uiState.panX,
+                panY = uiState.panY,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { offset ->
+                                val normX = offset.x / size.width.toFloat()
+                                val normY = offset.y / size.height.toFloat()
+                                viewModel.onSurfaceTapped(normX, normY)
+                            },
+                            onDoubleTap = {
+                                viewModel.resetPosition()
                             }
-                        }
-                )
-            } else {
-                CameraPreview(modifier = Modifier.fillMaxSize())
-
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = { offset ->
-                                    val normX = offset.x / size.width.toFloat()
-                                    val normY = offset.y / size.height.toFloat()
-                                    viewModel.onSurfaceTapped(normX, normY)
-                                },
-                                onDoubleTap = {
-                                    viewModel.resetPosition()
-                                }
-                            )
-                        }
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, rotation ->
-                                if (pan.x != 0f || pan.y != 0f) {
-                                    viewModel.updatePan(pan.x, pan.y)
-                                }
-                                if (zoom != 1.0f) {
-                                    viewModel.updateScale(zoom)
-                                }
-                                if (rotation != 0f) {
-                                    viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
-                                }
-                            }
-                        }
-                ) {
-                    // 1. Render ARCore Detected Planes and Point Cloud
-                    arPlaneRenderer.renderPlanes(
-                        drawScope = this,
-                        planes = uiState.detectedPlanes,
-                        pointCloud = uiState.pointCloud,
-                        anchor = uiState.surfaceAnchor,
-                        isPlaneMeshVisible = uiState.isPlaneMeshVisible,
-                        isPointCloudVisible = uiState.isPointCloudVisible,
-                        selectedPlaneId = uiState.selectedPlaneId,
-                        filter = uiState.planeFilter,
-                        textMeasurer = textMeasurer
-                    )
-
-                    // 2. Render 3D Model
-                    if (currentModel != null) {
-                        val anchor = uiState.surfaceAnchor
-                        val basePanY = if (anchor != null) 100f else 0f
-
-                        renderer.render(
-                            drawScope = this,
-                            model = currentModel,
-                            rotX = uiState.rotX + gyroPitch,
-                            rotY = uiState.rotY + gyroRoll + (anchor?.rotationY ?: 0f),
-                            rotZ = 0f,
-                            scale = uiState.scale * (anchor?.scale ?: 1.0f),
-                            panX = uiState.panX,
-                            panY = uiState.panY + basePanY,
-                            wireframe = uiState.isWireframe,
-                            primaryColor = uiState.modelColor,
-                            drawShadow = true,
-                            drawFloorGrid = false,
-                            hdriPreset = uiState.hdriPreset,
-                            engineProfile = uiState.renderEngineProfile
                         )
                     }
-                }
-            }
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, rotation ->
+                            if (pan.x != 0f || pan.y != 0f) {
+                                viewModel.updatePan(pan.x, pan.y)
+                            }
+                            if (zoom != 1.0f) {
+                                viewModel.updateScale(zoom)
+                            }
+                            if (rotation != 0f) {
+                                viewModel.updateRotation(deltaX = 0f, deltaY = rotation * 0.02f)
+                            }
+                        }
+                    }
+            )
         } else {
             Box(
                 modifier = Modifier

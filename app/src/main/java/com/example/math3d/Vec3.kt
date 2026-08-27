@@ -62,8 +62,11 @@ data class Triangle(
 data class Model3D(
     val name: String,
     val description: String,
-    val triangles: List<Triangle>,
+    val triangles: List<Triangle> = emptyList(),
     val fileUri: android.net.Uri? = null,
     val localFilePath: String? = null,
-    val isGlbOrGltf: Boolean = false
+    val isGlbOrGltf: Boolean = false,
+    val realWorldWidthMeters: Float = 0.5f,
+    val realWorldHeightMeters: Float = 0.5f,
+    val realWorldDepthMeters: Float = 0.5f
 )

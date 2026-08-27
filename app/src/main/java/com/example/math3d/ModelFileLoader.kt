@@ -32,49 +32,316 @@ object ModelFileLoader {
     fun loadModelFromUri(context: Context, uri: Uri): Model3D? {
         val rawName = getFileName(context, uri) ?: "Imported 3D Model"
         val displayName = formatCleanName(rawName)
-        val isGlbOrGltf = rawName.lowercase().endsWith(".glb") || rawName.lowercase().endsWith(".gltf")
+        val lowerName = rawName.lowercase()
+        val isZip = lowerName.endsWith(".zip") || lowerName.endsWith(".usdz")
+        val isGlbOrGltf = lowerName.endsWith(".glb") || lowerName.endsWith(".gltf") || isZip
 
         var cachedFile: java.io.File? = null
         try {
-            // Cache file for direct Filament / Sceneview GPU pipeline loading
-            val safeName = "imported_${System.currentTimeMillis()}_${rawName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")}"
-            val destFile = java.io.File(context.cacheDir, safeName)
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                destFile.outputStream().use { output ->
-                    input.copyTo(output)
+            val modelsDir = java.io.File(context.cacheDir, "spatial_models").apply { mkdirs() }
+            if (isZip) {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    cachedFile = extractZipAndFindMainModel(stream, modelsDir, rawName)
                 }
-            }
-            if (destFile.exists() && destFile.length() > 0) {
-                cachedFile = destFile
+            } else {
+                val safeName = "model_${System.currentTimeMillis()}_${rawName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")}"
+                val destFile = java.io.File(modelsDir, safeName)
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    destFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                if (destFile.exists() && destFile.length() > 0) {
+                    cachedFile = destFile
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
+        val finalCachedFile = cachedFile
         return try {
-            val inputStream = if (cachedFile != null && cachedFile.exists()) {
-                cachedFile.inputStream()
+            val inputStream = if (finalCachedFile != null && finalCachedFile.exists()) {
+                finalCachedFile.inputStream()
             } else {
                 context.contentResolver.openInputStream(uri) ?: return null
             }
             val bufferedStream = BufferedInputStream(inputStream, BUFFER_SIZE)
 
-            val triangles = parseStream(bufferedStream, rawName)
+            val parsedTargetName = finalCachedFile?.name ?: rawName
+            val triangles = parseStream(bufferedStream, parsedTargetName)
+            
+            // Calculate real-world metric dimensions
+            var realW = 0.5f
+            var realH = 0.5f
+            var realD = 0.5f
+            if (triangles.isNotEmpty()) {
+                var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+                var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+                for (t in triangles) {
+                    for (v in listOf(t.v1, t.v2, t.v3)) {
+                        minX = min(minX, v.x); minY = min(minY, v.y); minZ = min(minZ, v.z)
+                        maxX = max(maxX, v.x); maxY = max(maxY, v.y); maxZ = max(maxZ, v.z)
+                    }
+                }
+                realW = max(0.05f, maxX - minX)
+                realH = max(0.05f, maxY - minY)
+                realD = max(0.05f, maxZ - minZ)
+            }
+
             val normalized = if (triangles.isNotEmpty()) normalizeAndCenterMesh(triangles) else emptyList()
 
-            // If it's a GLB/GLTF model or we parsed triangles, create Model3D
-            if (triangles.isNotEmpty() || isGlbOrGltf || (cachedFile != null && cachedFile.exists())) {
+            // If non-GLB format (e.g. OBJ/STL/PLY) was parsed, convert to standard binary GLB so Filament loads it directly
+            var finalFilePath = finalCachedFile?.absolutePath
+            if (finalFilePath == null || (!finalFilePath.lowercase().endsWith(".glb") && !finalFilePath.lowercase().endsWith(".gltf"))) {
+                if (normalized.isNotEmpty()) {
+                    val exportedGlb = exportTrianglesToGlbFile(context, parsedTargetName, normalized)
+                    if (exportedGlb != null) {
+                        finalFilePath = exportedGlb
+                    }
+                }
+            }
+
+            if (triangles.isNotEmpty() || isGlbOrGltf || (finalFilePath != null && java.io.File(finalFilePath).exists())) {
                 Model3D(
                     name = displayName,
-                    description = if (triangles.isNotEmpty()) "${normalized.size} polygons loaded (${getFileFormatLabel(rawName)})" else "Hardware Accelerated 3D Model (${getFileFormatLabel(rawName)})",
+                    description = if (triangles.isNotEmpty()) "${normalized.size} polygons loaded (${getFileFormatLabel(parsedTargetName)})" else "Hardware Accelerated 3D Model (${getFileFormatLabel(parsedTargetName)})",
                     triangles = normalized,
                     fileUri = uri,
-                    localFilePath = cachedFile?.absolutePath,
-                    isGlbOrGltf = isGlbOrGltf
+                    localFilePath = finalFilePath,
+                    isGlbOrGltf = isGlbOrGltf,
+                    realWorldWidthMeters = realW,
+                    realWorldHeightMeters = realH,
+                    realWorldDepthMeters = realD
                 )
             } else {
                 null
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Extracts a ZIP / USDZ archive into an isolated folder so glTF relative companion
+     * resources (.bin, textures, .png, .jpg) are preserved in place for Filament / Sceneview.
+     */
+    private fun extractZipAndFindMainModel(
+        inputStream: InputStream,
+        targetParentDir: java.io.File,
+        archiveName: String
+    ): java.io.File? {
+        val extractFolder = java.io.File(
+            targetParentDir,
+            "bundle_${System.currentTimeMillis()}_${archiveName.substringBeforeLast('.')}"
+        ).apply { mkdirs() }
+
+        var mainModelFile: java.io.File? = null
+        val candidates = mutableListOf<java.io.File>()
+
+        ZipInputStream(BufferedInputStream(inputStream)).use { zis ->
+            var entry = zis.nextEntry
+            while (entry != null) {
+                val entryName = entry.name.replace("\\", "/")
+                if (!entry.isDirectory && !entryName.startsWith("__MACOSX") && !entryName.startsWith(".")) {
+                    val outputFile = java.io.File(extractFolder, entryName)
+                    outputFile.parentFile?.mkdirs()
+                    outputFile.outputStream().use { fos ->
+                        zis.copyTo(fos)
+                    }
+                    val lower = outputFile.name.lowercase()
+                    if (lower.endsWith(".glb") || lower.endsWith(".gltf") || lower.endsWith(".obj") ||
+                        lower.endsWith(".stl") || lower.endsWith(".ply") || lower.endsWith(".usdz") || lower.endsWith(".usda")
+                    ) {
+                        candidates.add(outputFile)
+                    }
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
+            }
+        }
+
+        // Prioritize GLB > GLTF > OBJ > others
+        mainModelFile = candidates.firstOrNull { it.name.lowercase().endsWith(".glb") }
+            ?: candidates.firstOrNull { it.name.lowercase().endsWith(".gltf") }
+            ?: candidates.firstOrNull { it.name.lowercase().endsWith(".obj") }
+            ?: candidates.firstOrNull()
+
+        return mainModelFile
+    }
+
+    /**
+     * Serializes meshes into standard binary GLB 2.0 container so Sceneview / Filament
+     * can render all procedural and imported models seamlessly on the GPU with full PBR.
+     */
+    fun exportProceduralMeshToObjFile(
+        context: Context,
+        modelName: String,
+        triangles: List<Triangle>
+    ): String? {
+        return exportTrianglesToGlbFile(context, modelName, triangles)
+    }
+
+    fun exportTrianglesToGlbFile(
+        context: Context,
+        modelName: String,
+        triangles: List<Triangle>
+    ): String? {
+        if (triangles.isEmpty()) return null
+        return try {
+            val dir = java.io.File(context.cacheDir, "procedural_models").apply { mkdirs() }
+            val cleanName = modelName.replace("[^a-zA-Z0-9_]".toRegex(), "_")
+            val glbFile = java.io.File(dir, "${cleanName}.glb")
+            if (glbFile.exists() && glbFile.length() > 0) {
+                return glbFile.absolutePath
+            }
+
+            val vertexCount = triangles.size * 3
+            val posByteLength = vertexCount * 12
+            val normByteLength = vertexCount * 12
+            val totalBinByteLength = posByteLength + normByteLength
+
+            var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+            var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+
+            val binBuffer = java.nio.ByteBuffer.allocate(totalBinByteLength).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+
+            // Write vertex positions
+            for (t in triangles) {
+                for (v in listOf(t.v1, t.v2, t.v3)) {
+                    binBuffer.putFloat(v.x)
+                    binBuffer.putFloat(v.y)
+                    binBuffer.putFloat(v.z)
+                    minX = min(minX, v.x); minY = min(minY, v.y); minZ = min(minZ, v.z)
+                    maxX = max(maxX, v.x); maxY = max(maxY, v.y); maxZ = max(maxZ, v.z)
+                }
+            }
+
+            // Write vertex normals
+            for (t in triangles) {
+                for (i in 0 until 3) {
+                    binBuffer.putFloat(t.normal.x)
+                    binBuffer.putFloat(t.normal.y)
+                    binBuffer.putFloat(t.normal.z)
+                }
+            }
+
+            val jsonString = """
+{
+  "asset": {
+    "generator": "AIS_MixedReality_GLB_Exporter",
+    "version": "2.0"
+  },
+  "scene": 0,
+  "scenes": [
+    { "nodes": [0] }
+  ],
+  "nodes": [
+    { "mesh": 0 }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1
+          },
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [0.85, 0.88, 0.95, 1.0],
+        "metallicFactor": 0.35,
+        "roughnessFactor": 0.25
+      },
+      "doubleSided": true
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "byteOffset": 0,
+      "componentType": 5126,
+      "count": $vertexCount,
+      "type": "VEC3",
+      "max": [$maxX, $maxY, $maxZ],
+      "min": [$minX, $minY, $minZ]
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 0,
+      "componentType": 5126,
+      "count": $vertexCount,
+      "type": "VEC3",
+      "max": [1.0, 1.0, 1.0],
+      "min": [-1.0, -1.0, -1.0]
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": $posByteLength,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": $posByteLength,
+      "byteLength": $normByteLength,
+      "target": 34962
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": $totalBinByteLength
+    }
+  ]
+}
+""".trimIndent()
+
+            val jsonBytes = jsonString.toByteArray(Charsets.UTF_8)
+            val jsonPadding = (4 - (jsonBytes.size % 4)) % 4
+            val paddedJsonLength = jsonBytes.size + jsonPadding
+
+            val binBytes = binBuffer.array()
+            val binPadding = (4 - (binBytes.size % 4)) % 4
+            val paddedBinLength = binBytes.size + binPadding
+
+            val totalGlbLength = 12 + 8 + paddedJsonLength + 8 + paddedBinLength
+
+            val glbBuffer = java.nio.ByteBuffer.allocate(totalGlbLength).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            // 12-byte GLB Header
+            glbBuffer.putInt(0x46546C67) // "glTF"
+            glbBuffer.putInt(2) // Version 2
+            glbBuffer.putInt(totalGlbLength)
+
+            // Chunk 0 (JSON)
+            glbBuffer.putInt(paddedJsonLength)
+            glbBuffer.putInt(0x4E4F534A) // "JSON"
+            glbBuffer.put(jsonBytes)
+            for (p in 0 until jsonPadding) {
+                glbBuffer.put(0x20.toByte()) // ASCII space padding
+            }
+
+            // Chunk 1 (BIN)
+            glbBuffer.putInt(paddedBinLength)
+            glbBuffer.putInt(0x004E4942) // "BIN\0"
+            glbBuffer.put(binBytes)
+            for (p in 0 until binPadding) {
+                glbBuffer.put(0x00.toByte()) // Zero padding
+            }
+
+            glbFile.outputStream().use { fos ->
+                fos.write(glbBuffer.array())
+            }
+
+            glbFile.absolutePath
         } catch (e: Exception) {
             e.printStackTrace()
             null

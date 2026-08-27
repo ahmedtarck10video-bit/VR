@@ -56,14 +56,13 @@ fun Sceneview3DViewport(
                     try {
                         val filePath = targetModel.localFilePath
                         val file = if (filePath != null) File(filePath) else null
-                        val instance = withContext(Dispatchers.IO) {
-                            if (file != null && file.exists()) {
-                                sceneView.modelLoader.createModelInstance(file)
-                            } else if (targetModel.fileUri != null) {
-                                sceneView.modelLoader.loadModelInstance(targetModel.fileUri.toString())
-                            } else {
-                                null
-                            }
+                        
+                        val instance = if (file != null && file.exists()) {
+                            sceneView.modelLoader.createModelInstance(file)
+                        } else if (targetModel.fileUri != null) {
+                            sceneView.modelLoader.loadModelInstance(targetModel.fileUri.toString())
+                        } else {
+                            null
                         }
 
                         if (instance != null) {
