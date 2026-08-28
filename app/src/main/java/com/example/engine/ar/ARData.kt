@@ -20,6 +20,14 @@ enum class ARPlacementMode(val label: String) {
     FREE_FLOAT("Free Float")
 }
 
+enum class ARHitType(val label: String) {
+    PLANE_POLYGON("Physical Plane"),
+    DEPTH_POINT("Depth API Surface"),
+    FEATURE_POINT("Feature Point Normal"),
+    INSTANT_PLACEMENT("Instant Placement"),
+    GEOMETRIC_FALLBACK("Sensor Approximation")
+}
+
 data class ARTrackedPlane(
     val id: String,
     val center: Vec3,
@@ -43,5 +51,7 @@ data class ARSurfaceAnchor(
     val scale: Float = 1.0f,
     val isGrounded: Boolean = true,
     val surfaceType: PlaneOrientation = PlaneOrientation.HORIZONTAL_UPWARD,
-    val arcoreAnchor: com.google.ar.core.Anchor? = null
+    val arcoreAnchor: com.google.ar.core.Anchor? = null,
+    val isReal6DOFTracking: Boolean = (arcoreAnchor != null),
+    val hitType: ARHitType = if (arcoreAnchor != null) ARHitType.PLANE_POLYGON else ARHitType.GEOMETRIC_FALLBACK
 )

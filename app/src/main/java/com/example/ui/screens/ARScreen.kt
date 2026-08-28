@@ -96,6 +96,55 @@ fun ARScreen(
                         }
                     }
             )
+
+            // Floating HUD Overlay for AR Tracking & Hit Status
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.Black.copy(alpha = 0.65f),
+                    contentColor = Color.White,
+                    tonalElevation = 6.dp,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        val anchor = uiState.surfaceAnchor
+                        if (anchor != null) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(if (anchor.isReal6DOFTracking) Color(0xFF4CAF50) else Color(0xFFFFB300))
+                            )
+                            Text(
+                                text = "${anchor.hitType.label} • ${anchor.surfaceType.label}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2196F3))
+                            )
+                            Text(
+                                text = "Tap any surface or object to Anchor",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
         } else {
             Box(
                 modifier = Modifier

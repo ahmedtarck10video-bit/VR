@@ -319,17 +319,38 @@ object ModelFileLoader {
                 )
             }
 
-            // Strategy 1: Full Recursive Parent-Child Hierarchy Matrix Traversal
+            // Strategy 1: Active Scene Hierarchy Traversal (Root -> Parent -> Child -> Primitives)
             if (nodes != null && meshBounds.isNotEmpty()) {
                 val nodeCount = nodes.length()
-                val childSet = HashSet<Int>()
+                val scenesArr = root.optJSONArray("scenes")
+                val activeSceneIdx = root.optInt("scene", 0)
 
-                for (n in 0 until nodeCount) {
-                    val node = nodes.optJSONObject(n) ?: continue
-                    val childrenArr = node.optJSONArray("children")
-                    if (childrenArr != null) {
-                        for (c in 0 until childrenArr.length()) {
-                            childSet.add(childrenArr.getInt(c))
+                val sceneRootNodeIndices = mutableListOf<Int>()
+                if (scenesArr != null && activeSceneIdx in 0 until scenesArr.length()) {
+                    val activeSceneObj = scenesArr.optJSONObject(activeSceneIdx)
+                    val activeNodesArr = activeSceneObj?.optJSONArray("nodes")
+                    if (activeNodesArr != null) {
+                        for (i in 0 until activeNodesArr.length()) {
+                            sceneRootNodeIndices.add(activeNodesArr.getInt(i))
+                        }
+                    }
+                }
+
+                // If no scene specified, find all nodes that are not children of any other node
+                if (sceneRootNodeIndices.isEmpty()) {
+                    val childSet = HashSet<Int>()
+                    for (n in 0 until nodeCount) {
+                        val node = nodes.optJSONObject(n) ?: continue
+                        val childrenArr = node.optJSONArray("children")
+                        if (childrenArr != null) {
+                            for (c in 0 until childrenArr.length()) {
+                                childSet.add(childrenArr.getInt(c))
+                            }
+                        }
+                    }
+                    for (n in 0 until nodeCount) {
+                        if (!childSet.contains(n)) {
+                            sceneRootNodeIndices.add(n)
                         }
                     }
                 }
@@ -382,11 +403,9 @@ object ModelFileLoader {
                     0f, 0f, 0f, 1f
                 )
 
-                // Traverse from roots
-                for (n in 0 until nodeCount) {
-                    if (!childSet.contains(n)) {
-                        traverseNode(n, identity)
-                    }
+                // Traverse only active scene root nodes
+                for (rootIdx in sceneRootNodeIndices) {
+                    traverseNode(rootIdx, identity)
                 }
             }
 

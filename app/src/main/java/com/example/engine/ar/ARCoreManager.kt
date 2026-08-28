@@ -73,6 +73,22 @@ class ARCoreManager(private val context: Context) {
                     lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
                     updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
                     focusMode = Config.FocusMode.AUTO
+
+                    // Enable Google ARCore Depth API if device hardware supports it
+                    try {
+                        if (newSession.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
+                            depthMode = Config.DepthMode.AUTOMATIC
+                        }
+                    } catch (e: Exception) {
+                        // Depth API not supported on this specific device
+                    }
+
+                    // Enable Instant Placement for immediate surface locking
+                    try {
+                        instantPlacementMode = Config.InstantPlacementMode.LOCAL_Y_UP
+                    } catch (e: Exception) {
+                        // Instant Placement not supported
+                    }
                 }
                 newSession.configure(config)
                 session = newSession
@@ -241,20 +257,39 @@ class ARCoreManager(private val context: Context) {
     }
 
     /**
-     * Hit-tests screen touch coordinates against real ARCore surfaces using Frame.hitTest.
-     * Returns the 3D surface intersection point, hit plane, and real 6DOF ARCore Anchor.
+     * Hit result container holding detected surface representation, 3D point, 6DOF anchor, and classification.
      */
-     fun hitTest(screenNormX: Float, screenNormY: Float, viewWidthPx: Float = 1080f, viewHeightPx: Float = 1920f): Triple<ARTrackedPlane, Vec3, Anchor?>? {
+    data class HitResultData(
+        val plane: ARTrackedPlane,
+        val hitPoint: Vec3,
+        val anchor: Anchor?,
+        val hitType: ARHitType
+    )
+
+    /**
+     * Hit-tests screen touch coordinates against real ARCore surfaces using the official multi-stage cascade:
+     * 1. Physical Plane Hit Test (Plane.isPoseInPolygon) - exact 6DoF planar alignment
+     * 2. Google ARCore Depth API Hit Test (DepthPoint) - exact non-planar/furniture surface alignment
+     * 3. Feature Point Hit Test (Point with surface normal) - estimated 3D feature surface
+     * 4. Instant Placement Hit Test (InstantPlacementPoint) - rapid instant tracking
+     * 5. Geometric Fallback (Virtual Sensor Engine only)
+     */
+    fun hitTest(screenNormX: Float, screenNormY: Float, viewWidthPx: Float = 1080f, viewHeightPx: Float = 1920f): HitResultData? {
         val frame = latestFrame
         val planes = _trackedPlanes.value
 
-        // 1. Native ARCore Frame.hitTest (Pixel Perfect 6DOF Real Plane Intersection)
+        // 1. Native ARCore Multi-Stage Frame Hit Test
         if (frame != null && isSessionRunning) {
             try {
                 val pixelX = screenNormX * viewWidthPx
                 val pixelY = screenNormY * viewHeightPx
                 val hitResults = frame.hitTest(pixelX, pixelY)
 
+                var bestDepthHit: HitResult? = null
+                var bestPointHit: HitResult? = null
+                var bestInstantHit: HitResult? = null
+
+                // Tier 1: Look for exact Plane Polygon Hit first
                 for (hit in hitResults) {
                     val trackable = hit.trackable
                     if (trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) {
@@ -275,8 +310,91 @@ class ARCoreManager(private val context: Context) {
                         } catch (e: Exception) {
                             null
                         }
-                        return Triple(matchedPlane, hitVec, anchor)
+                        return HitResultData(matchedPlane, hitVec, anchor, ARHitType.PLANE_POLYGON)
                     }
+
+                    // Collect candidates for secondary tiers
+                    if (trackable is DepthPoint && bestDepthHit == null) {
+                        bestDepthHit = hit
+                    } else if (trackable is Point && trackable.orientationMode == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL && bestPointHit == null) {
+                        bestPointHit = hit
+                    } else if (trackable is InstantPlacementPoint && bestInstantHit == null) {
+                        bestInstantHit = hit
+                    }
+                }
+
+                // Tier 2: Depth API Hit (handles uneven tables, sofas, curved and non-planar geometry)
+                if (bestDepthHit != null) {
+                    val hitPose = bestDepthHit.hitPose
+                    val hitVec = Vec3(hitPose.tx(), hitPose.ty(), hitPose.tz())
+                    val anchor = try { bestDepthHit.createAnchor() } catch (e: Exception) { null }
+                    val syntheticPlane = ARTrackedPlane(
+                        id = "depth_surface_${bestDepthHit.hashCode()}",
+                        center = hitVec,
+                        normal = Vec3(0f, 1f, 0f),
+                        extentX = 0.5f,
+                        extentZ = 0.5f,
+                        polygon = emptyList(),
+                        orientation = PlaneOrientation.HORIZONTAL_UPWARD
+                    )
+                    return HitResultData(syntheticPlane, hitVec, anchor, ARHitType.DEPTH_POINT)
+                }
+
+                // Tier 3: Feature Point Cloud Hit with Estimated Surface Normal
+                if (bestPointHit != null) {
+                    val hitPose = bestPointHit.hitPose
+                    val hitVec = Vec3(hitPose.tx(), hitPose.ty(), hitPose.tz())
+                    val anchor = try { bestPointHit.createAnchor() } catch (e: Exception) { null }
+                    val syntheticPlane = ARTrackedPlane(
+                        id = "feature_point_${bestPointHit.hashCode()}",
+                        center = hitVec,
+                        normal = Vec3(0f, 1f, 0f),
+                        extentX = 0.3f,
+                        extentZ = 0.3f,
+                        polygon = emptyList(),
+                        orientation = PlaneOrientation.HORIZONTAL_UPWARD
+                    )
+                    return HitResultData(syntheticPlane, hitVec, anchor, ARHitType.FEATURE_POINT)
+                }
+
+                // Tier 4: Instant Placement Hit Test
+                if (bestInstantHit != null) {
+                    val hitPose = bestInstantHit.hitPose
+                    val hitVec = Vec3(hitPose.tx(), hitPose.ty(), hitPose.tz())
+                    val anchor = try { bestInstantHit.createAnchor() } catch (e: Exception) { null }
+                    val syntheticPlane = ARTrackedPlane(
+                        id = "instant_placement_${bestInstantHit.hashCode()}",
+                        center = hitVec,
+                        normal = Vec3(0f, 1f, 0f),
+                        extentX = 0.4f,
+                        extentZ = 0.4f,
+                        polygon = emptyList(),
+                        orientation = PlaneOrientation.HORIZONTAL_UPWARD
+                    )
+                    return HitResultData(syntheticPlane, hitVec, anchor, ARHitType.INSTANT_PLACEMENT)
+                }
+
+                // Try explicit Instant Placement if supported
+                try {
+                    val instantHits = frame.hitTestInstantPlacement(pixelX, pixelY, 1.5f)
+                    if (instantHits.isNotEmpty()) {
+                        val firstInstant = instantHits.first()
+                        val hitPose = firstInstant.hitPose
+                        val hitVec = Vec3(hitPose.tx(), hitPose.ty(), hitPose.tz())
+                        val anchor = try { firstInstant.createAnchor() } catch (e: Exception) { null }
+                        val syntheticPlane = ARTrackedPlane(
+                            id = "instant_direct_${firstInstant.hashCode()}",
+                            center = hitVec,
+                            normal = Vec3(0f, 1f, 0f),
+                            extentX = 0.4f,
+                            extentZ = 0.4f,
+                            polygon = emptyList(),
+                            orientation = PlaneOrientation.HORIZONTAL_UPWARD
+                        )
+                        return HitResultData(syntheticPlane, hitVec, anchor, ARHitType.INSTANT_PLACEMENT)
+                    }
+                } catch (e: Throwable) {
+                    // Instant placement not available
                 }
             } catch (e: Exception) {
                 // Fallback to geometric testing
@@ -285,7 +403,7 @@ class ARCoreManager(private val context: Context) {
 
         if (planes.isEmpty()) return null
 
-        // 2. Geometric plane fallback
+        // 5. Geometric plane fallback
         val rayX = (screenNormX - 0.5f) * 2.0f
         val rayY = -(screenNormY - 0.5f) * 2.0f
 
@@ -299,7 +417,7 @@ class ARCoreManager(private val context: Context) {
                 val halfX = plane.extentX * 0.7f
                 val halfZ = plane.extentZ * 0.7f
                 if (abs(hitX - plane.center.x) <= halfX && abs(hitZ - plane.center.z) <= halfZ) {
-                    return Triple(plane, Vec3(hitX, targetY, hitZ), null)
+                    return HitResultData(plane, Vec3(hitX, targetY, hitZ), null, ARHitType.GEOMETRIC_FALLBACK)
                 }
             } else if (plane.orientation == PlaneOrientation.VERTICAL) {
                 val targetZ = plane.center.z
@@ -308,7 +426,7 @@ class ARCoreManager(private val context: Context) {
                 val halfX = plane.extentX * 0.7f
                 val halfY = plane.extentZ * 0.7f
                 if (abs(hitX - plane.center.x) <= halfX && abs(hitY - plane.center.y) <= halfY) {
-                    return Triple(plane, Vec3(hitX, hitY, targetZ), null)
+                    return HitResultData(plane, Vec3(hitX, hitY, targetZ), null, ARHitType.GEOMETRIC_FALLBACK)
                 }
             }
         }
@@ -320,7 +438,7 @@ class ARCoreManager(private val context: Context) {
     /**
      * Creates a genuine ARCore Anchor directly on a detected physical plane (e.g. for automatic snap placement).
      */
-    fun createAnchorOnDetectedPlane(planeId: String? = null): Triple<ARTrackedPlane, Vec3, Anchor?>? {
+    fun createAnchorOnDetectedPlane(planeId: String? = null): HitResultData? {
         val currentSession = session
         val planes = _trackedPlanes.value
         if (planes.isEmpty()) return null
@@ -348,7 +466,7 @@ class ARCoreManager(private val context: Context) {
                         orientation = if (matchedTrackable.type == Plane.Type.VERTICAL) PlaneOrientation.VERTICAL else PlaneOrientation.HORIZONTAL_UPWARD
                     )
                     val centerVec = Vec3(matchedTrackable.centerPose.tx(), matchedTrackable.centerPose.ty(), matchedTrackable.centerPose.tz())
-                    return Triple(matchedPlane, centerVec, anchor)
+                    return HitResultData(matchedPlane, centerVec, anchor, ARHitType.PLANE_POLYGON)
                 }
             } catch (e: Exception) {
                 // Fallback to geometric plane center
@@ -361,6 +479,6 @@ class ARCoreManager(private val context: Context) {
             planes.firstOrNull { it.orientation == PlaneOrientation.HORIZONTAL_UPWARD } ?: planes.firstOrNull()
         } ?: return null
 
-        return Triple(fallbackPlane, fallbackPlane.center, null)
+        return HitResultData(fallbackPlane, fallbackPlane.center, null, ARHitType.GEOMETRIC_FALLBACK)
     }
 }

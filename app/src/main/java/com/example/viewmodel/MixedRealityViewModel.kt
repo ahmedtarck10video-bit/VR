@@ -239,32 +239,32 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     // =========================================================================
 
     /**
-     * Hit tests normalized screen tap coordinates against physical detected planes.
+     * Hit tests normalized screen tap coordinates against physical detected surfaces using Google ARCore cascade.
      */
     fun onSurfaceTapped(screenNormX: Float, screenNormY: Float) {
         val hitResult = arCoreManager.hitTest(screenNormX, screenNormY)
         if (hitResult != null) {
-            val (plane, hitPoint, arAnchor) = hitResult
             val anchor = ARSurfaceAnchor(
                 id = "anchor_${System.currentTimeMillis()}",
-                planeId = plane.id,
-                position = hitPoint,
-                normal = plane.normal,
+                planeId = hitResult.plane.id,
+                position = hitResult.hitPoint,
+                normal = hitResult.plane.normal,
                 rotationY = _uiState.value.rotY,
                 scale = _uiState.value.scale,
                 isGrounded = true,
-                surfaceType = plane.orientation,
-                arcoreAnchor = arAnchor
+                surfaceType = hitResult.plane.orientation,
+                arcoreAnchor = hitResult.anchor,
+                hitType = hitResult.hitType
             )
 
             _uiState.value = _uiState.value.copy(
                 surfaceAnchor = anchor,
-                selectedPlaneId = plane.id,
+                selectedPlaneId = hitResult.plane.id,
                 arAnchorPlaced = true,
                 panX = 0f,
                 panY = 0f
             )
-            showNotification("Object Anchored to ${plane.orientation.label}")
+            showNotification("Anchored via ${hitResult.hitType.label} (${hitResult.plane.orientation.label})")
         } else {
             showNotification("No surface detected at tap location")
         }
@@ -273,26 +273,26 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     fun placeModelOnDetectedSurface() {
         val result = arCoreManager.createAnchorOnDetectedPlane()
         if (result != null) {
-            val (targetPlane, centerPos, arAnchor) = result
             val anchor = ARSurfaceAnchor(
                 id = "anchor_snapped_${System.currentTimeMillis()}",
-                planeId = targetPlane.id,
-                position = centerPos,
-                normal = targetPlane.normal,
+                planeId = result.plane.id,
+                position = result.hitPoint,
+                normal = result.plane.normal,
                 rotationY = _uiState.value.rotY,
                 scale = _uiState.value.scale,
                 isGrounded = true,
-                surfaceType = targetPlane.orientation,
-                arcoreAnchor = arAnchor
+                surfaceType = result.plane.orientation,
+                arcoreAnchor = result.anchor,
+                hitType = result.hitType
             )
             _uiState.value = _uiState.value.copy(
                 surfaceAnchor = anchor,
-                selectedPlaneId = targetPlane.id,
+                selectedPlaneId = result.plane.id,
                 arAnchorPlaced = true,
                 panX = 0f,
                 panY = 0f
             )
-            showNotification("Anchored to ${targetPlane.orientation.label}")
+            showNotification("Anchored via ${result.hitType.label} (${result.plane.orientation.label})")
         } else {
             showNotification("Scanning for physical surface...")
         }
