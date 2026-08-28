@@ -69,4 +69,7 @@ data class Model3D(
     val realWorldWidthMeters: Float = 0.5f,
     val realWorldHeightMeters: Float = 0.5f,
     val realWorldDepthMeters: Float = 0.5f
-)
+) {
+    val trianglesCount: Int get() = triangles.size
+    val verticesCount: Int get() = triangles.size * 3
+}

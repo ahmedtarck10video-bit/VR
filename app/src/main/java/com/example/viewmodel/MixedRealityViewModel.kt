@@ -2,7 +2,6 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
@@ -15,95 +14,155 @@ import com.example.engine.ar.*
 import com.example.math3d.Model3D
 import com.example.math3d.ModelFileLoader
 import com.example.math3d.Vec3
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.io.File
 
-enum class SpatialMode(val label: String) {
-    MR("MR"),
-    AR("AR"),
-    OBJECT("Object")
+enum class SpatialMode(val title: String, val badge: String) {
+    OBJECT("3D Object", "Pure 3D"),
+    AR("Augmented Reality", "6DoF Camera"),
+    MR("Mixed Reality", "MR Pass-through");
+
+    val label: String get() = title
 }
 
-enum class MRSubMode(val title: String, val desc: String) {
-    STEREO_PASSTHROUGH("Stereo Dual Camera", "Dual-eye passthrough with IPD adjustment for VR/MR glasses"),
-    SPATIAL_HOLO("Spatial Hologram", "Holographic projection with spatial grid and light rings"),
-    SURFACE_ANCHOR("Surface Anchor", "Physics-grounded surface anchor with realistic shadow")
+enum class MRSubMode(val title: String) {
+    PASS_THROUGH("AR Passthrough"),
+    SPATIAL_PORTAL("Spatial Portal"),
+    HOLO_DECK("Holo Deck"),
+    AI_SEMANTIC_VISION("AI Semantic Vision")
 }
 
-enum class AppTab {
-    STUDIO_3D,
-    AR_MODE,
-    STEREO_VR
+enum class MeshQuality(val label: String) {
+    LOW("Fast (Low)"),
+    MEDIUM("Balanced"),
+    HIGH("Ultra Precision"),
+    CINEMATIC("Cinematic PBR")
 }
 
-enum class SpatialAppId(val title: String) {
+enum class SpatialAppId(val displayName: String) {
     STUDIO_3D("3D Studio"),
     AR_MODE("AR Space"),
-    STEREO_VR("VR Headset"),
-    GALLERY("Spatial Files"),
+    STEREO_VR("VR Vision"),
+    GALLERY("Holo Files"),
     NOTES("Spatial Notes"),
     SETTINGS("Settings")
-}
-
-enum class SpatialEnvironment(val displayName: String, val gradientColors: List<Color>) {
-    HORIZON("Glass Horizon", listOf(Color(0xFF0F172A), Color(0xFF020617), Color(0xFF1E1B4B))),
-    CYBER_VOID("Cyber Void", listOf(Color(0xFF0B0E14), Color(0xFF0D1B2A), Color(0xFF001220))),
-    DEEP_SPACE("Deep Nebula", listOf(Color(0xFF19002E), Color(0xFF0B001A), Color(0xFF240046))),
-    STUDIO("Pro Studio", listOf(Color(0xFF1E293B), Color(0xFF0F172A), Color(0xFF334155)))
 }
 
 data class WindowState(
     val appId: SpatialAppId,
     val isOpen: Boolean = true,
     val isMinimized: Boolean = false,
-    val isMaximized: Boolean = false
+    val isMaximized: Boolean = false,
+    val zIndex: Int = 0
 )
+
+enum class SpatialEnvironment(val displayName: String, val hdriPreset: HdriPreset) {
+    STUDIO_VOID("Studio Void", HdriPreset.STUDIO_PRO),
+    GOLDEN_SUNSET("Golden Sunset", HdriPreset.GOLDEN_HOUR),
+    CYBERPUNK_NEON("Cyberpunk Neon", HdriPreset.CYBER_NEON),
+    URBAN_SKY("Urban Daylight", HdriPreset.URBAN_DAYLIGHT),
+    FOREST_CANOPY("Forest Canopy", HdriPreset.FOREST_CANOPY)
+}
 
 data class MRUiState(
     val currentMode: SpatialMode = SpatialMode.OBJECT,
-    val mrSubMode: MRSubMode = MRSubMode.STEREO_PASSTHROUGH,
-    val currentTab: AppTab = AppTab.STUDIO_3D,
-    val activeAppId: SpatialAppId = SpatialAppId.STUDIO_3D,
-    val openWindows: Map<SpatialAppId, WindowState> = mapOf(
-        SpatialAppId.STUDIO_3D to WindowState(SpatialAppId.STUDIO_3D, isOpen = true)
-    ),
-    val isLauncherOpen: Boolean = false,
-    val environment: SpatialEnvironment = SpatialEnvironment.HORIZON,
-    val spatialAudioEnabled: Boolean = true,
-    val currentModel: Model3D? = null,
-    val loadedModelUri: Uri? = null,
-    val selectedModelIndex: Int = 0,
+    val mrSubMode: MRSubMode = MRSubMode.PASS_THROUGH,
+    val gyroEnabled: Boolean = true,
+    val isGyroEnabled: Boolean = true,
+    val orientation: SensorOrientation = SensorOrientation(),
+    val sensorOrientation: SensorOrientation = SensorOrientation(),
     val models: List<Model3D> = emptyList(),
-    val rotX: Float = 0.2f,
-    val rotY: Float = 0.4f,
-    val rotZ: Float = 0f,
+    val selectedModelIndex: Int = 0,
+    val currentModel: Model3D? = null,
     val scale: Float = 1.0f,
+    val rotX: Float = 0f,
+    val rotY: Float = 0f,
+    val rotZ: Float = 0f,
+    val posX: Float = 0f,
+    val posY: Float = 0f,
+    val posZ: Float = 0f,
     val panX: Float = 0f,
     val panY: Float = 0f,
-    val isAutoSpin: Boolean = false,
+    val ipdDistance: Float = 0.064f,
+    val showPhotoFlash: Boolean = false,
     val isWireframe: Boolean = false,
-    val isGyroEnabled: Boolean = true,
-    val modelColor: Color = Color(0xFFE2DCD4),
-    val sensorOrientation: SensorOrientation = SensorOrientation(),
-    val arSurfaceDetected: Boolean = true,
-    val arAnchorPlaced: Boolean = true,
-    val ipdDistance: Float = 0.12f,
+    val isLightingEnabled: Boolean = true,
+    val isAutoRotating: Boolean = false,
+    val isAutoSpin: Boolean = false,
+    val isXRayEnabled: Boolean = false,
+    val isGhostMode: Boolean = false,
+    val isThermalVision: Boolean = false,
+    val isNightVision: Boolean = false,
+    val isEdgeDetection: Boolean = false,
+    val isHologramGlitch: Boolean = false,
+    val isDepthColoring: Boolean = false,
+    val isDepthOcclusion: Boolean = true,
+    val isBloomEnabled: Boolean = true,
+    val isAmbientOcclusion: Boolean = true,
+    val isShadowsEnabled: Boolean = true,
+    val isPbrMetallic: Boolean = true,
+    val isNormalMapping: Boolean = true,
+    val isRoughnessMapping: Boolean = true,
+    val isEmissionEnabled: Boolean = true,
+    val isChromaKeyEnabled: Boolean = false,
+    val isPortalView: Boolean = false,
+    val isSpatialGrid: Boolean = true,
+    val isPerformanceHud: Boolean = true,
+    val isHdrToneMapping: Boolean = true,
+    val isVignetteEnabled: Boolean = false,
+    val isChromaticAberration: Boolean = false,
+    val isScanlinesEnabled: Boolean = false,
+    val isAnaglyph3D: Boolean = false,
+    val isSideBySideVR: Boolean = false,
+    val isStereoFov: Boolean = false,
+    val passthroughOpacity: Float = 1.0f,
+    val meshQuality: MeshQuality = MeshQuality.HIGH,
+    val spatialAudioEnabled: Boolean = true,
+    val occlusionThreshold: Float = 0.5f,
+    val cameraExposure: Float = 0.0f,
+    val cameraFlashlight: Boolean = false,
+    val arAnchorPlaced: Boolean = false,
     val isRecording: Boolean = false,
     val recordingSeconds: Int = 0,
-    val showPhotoFlash: Boolean = false,
+    val fps: Int = 60,
+    val frameTimeMs: Float = 16.6f,
+    val drawCalls: Int = 1,
+    val trianglesCount: Int = 0,
+    val verticesCount: Int = 0,
+    val activePassCount: Int = 1,
+    val memoryUsageMb: Int = 42,
+    val fov: Float = 60f,
+    val nearClip: Float = 0.1f,
+    val farClip: Float = 100f,
+    val isMeasurementToolActive: Boolean = false,
+    val measurementDistanceMeters: Float = 0.0f,
+    val isMeshInspectMode: Boolean = false,
+    val isColorGradingWarm: Boolean = false,
+    val isColorGradingCool: Boolean = false,
+    val isColorGradingCyberpunk: Boolean = false,
+    val isAnimationPlaying: Boolean = true,
+    val animationSpeed: Float = 1.0f,
+    val modelOpacity: Float = 1.0f,
+    val environment: SpatialEnvironment = SpatialEnvironment.STUDIO_VOID,
+    val spatialEnvironment: SpatialEnvironment = SpatialEnvironment.STUDIO_VOID,
+    val modelColor: Color = Color(0xFF00E5FF),
     val hdriPreset: HdriPreset = HdriPreset.STUDIO_PRO,
     val renderEngineProfile: RenderEngineProfile = RenderEngineProfile.REALITYKIT,
     val isModelPickerOpen: Boolean = false,
     val isLoadingModel: Boolean = false,
     val notificationMessage: String? = null,
 
+    // Window management
+    val openWindows: Map<SpatialAppId, WindowState> = emptyMap(),
+    val activeAppId: SpatialAppId? = null,
+
     // ARCore & AR Foundation Plane Detection State
+    val capabilities: ARCoreCapabilities = ARCoreCapabilities(),
     val detectedPlanes: List<ARTrackedPlane> = emptyList(),
     val trackedImages: List<ARTrackedImage> = emptyList(),
     val pointCloud: List<Vec3> = emptyList(),
@@ -118,8 +177,12 @@ data class MRUiState(
     val trackingQuality: ARTrackingStateQuality = ARTrackingStateQuality.INITIALIZING,
     val geospatialInfo: ARGeospatialInfo = ARGeospatialInfo(),
     val streetscapeMeshes: List<ARStreetscapeMesh> = emptyList(),
+    val semanticDistribution: Map<SceneSemanticType, Float> = emptyMap(),
+    val depthFusionInfo: ARDepthFusionInfo = ARDepthFusionInfo(),
     val faceTracking: ARFaceMeshTracking = ARFaceMeshTracking(),
+    val isFaceTrackingActive: Boolean = false,
     val persistentAnchors: List<PersistentARAnchorData> = emptyList(),
+    val recordedSessions: List<RecordedSessionItem> = emptyList(),
     val cloudAnchorStatus: String? = null,
     val isArSuitePanelOpen: Boolean = false
 )
@@ -135,7 +198,6 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
 
     init {
         sensorTracker.start()
-        // Do not start ARCore session prematurely while in Object Mode to save CPU, GPU and RAM
 
         val defaultModels = com.example.math3d.MeshGenerator.getDefaultModels()
         _uiState.value = _uiState.value.copy(
@@ -144,31 +206,22 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             selectedModelIndex = 0
         )
 
-        viewModelScope.launch(Dispatchers.IO) {
-            val enriched = defaultModels.map { m ->
-                val path = com.example.math3d.ModelFileLoader.exportTrianglesToGlbFile(
-                    application,
-                    m.name,
-                    m.triangles
-                )
-                m.copy(localFilePath = path, isGlbOrGltf = true)
+        // Collect hardware capabilities
+        viewModelScope.launch {
+            arCoreManager.capabilities.collect { caps ->
+                _uiState.value = _uiState.value.copy(capabilities = caps)
             }
-            _uiState.value = _uiState.value.copy(
-                models = enriched,
-                currentModel = enriched.getOrNull(_uiState.value.selectedModelIndex) ?: enriched.firstOrNull()
-            )
         }
 
-        // Observe sensors and update AR tracking
+        // Collect sensor updates
         viewModelScope.launch {
             sensorTracker.orientation.collect { orientation ->
-                _uiState.value = _uiState.value.copy(sensorOrientation = orientation)
-                if (_uiState.value.currentMode == SpatialMode.AR || _uiState.value.currentMode == SpatialMode.MR) {
-                    arCoreManager.updateFrame(
-                        pitch = orientation.pitch,
-                        roll = orientation.roll,
-                        yaw = orientation.yaw
-                    )
+                _uiState.value = _uiState.value.copy(
+                    orientation = orientation,
+                    sensorOrientation = orientation
+                )
+                if (_uiState.value.currentMode != SpatialMode.OBJECT) {
+                    arCoreManager.updateFrame(orientation.pitch, orientation.roll, orientation.yaw)
                 }
             }
         }
@@ -176,10 +229,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         // Collect ARCore detected planes
         viewModelScope.launch {
             arCoreManager.trackedPlanes.collect { planes ->
-                _uiState.value = _uiState.value.copy(
-                    detectedPlanes = planes,
-                    arSurfaceDetected = planes.isNotEmpty()
-                )
+                _uiState.value = _uiState.value.copy(detectedPlanes = planes)
             }
         }
 
@@ -225,10 +275,38 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             }
         }
 
+        // Collect Scene Semantics
+        viewModelScope.launch {
+            arCoreManager.semanticDistribution.collect { dist ->
+                _uiState.value = _uiState.value.copy(semanticDistribution = dist)
+            }
+        }
+
+        // Collect Depth Fusion
+        viewModelScope.launch {
+            arCoreManager.depthFusionInfo.collect { depthInfo ->
+                _uiState.value = _uiState.value.copy(depthFusionInfo = depthInfo)
+            }
+        }
+
+        // Collect Face Tracking
+        viewModelScope.launch {
+            arCoreManager.faceMeshTracking.collect { faceInfo ->
+                _uiState.value = _uiState.value.copy(faceTracking = faceInfo)
+            }
+        }
+
         // Collect ARCore light estimation
         viewModelScope.launch {
             arCoreManager.lightIntensity.collect { intensity ->
                 _uiState.value = _uiState.value.copy(lightIntensity = intensity)
+            }
+        }
+
+        // Collect Recorded Sessions list
+        viewModelScope.launch {
+            arCoreManager.recordedSessions.collect { sessions ->
+                _uiState.value = _uiState.value.copy(recordedSessions = sessions)
             }
         }
 
@@ -247,7 +325,6 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         if (mode == SpatialMode.AR || mode == SpatialMode.MR) {
             arCoreManager.start()
         } else {
-            // Pure Object 3D Mode: pause ARCore to ensure zero camera/sensor background drain
             arCoreManager.pause()
         }
     }
@@ -257,182 +334,64 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         showNotification(subMode.title)
     }
 
-    fun toggleGyro() {
-        val newState = !_uiState.value.isGyroEnabled
-        _uiState.value = _uiState.value.copy(isGyroEnabled = newState)
-        showNotification(if (newState) "Gyroscope Enabled" else "Gyroscope Disabled")
-    }
-
-    fun calibrateGyro() {
-        sensorTracker.calibrate()
-        showNotification("Gyroscope Calibrated")
-    }
-
-    // =========================================================================
-    // ARCORE PLANE HIT-TESTING & SURFACE PLACEMENT
-    // =========================================================================
-
-    /**
-     * Hit tests normalized screen tap coordinates against physical detected surfaces using Google ARCore cascade.
-     */
-    fun onSurfaceTapped(screenNormX: Float, screenNormY: Float) {
-        val hitResult = arCoreManager.hitTest(screenNormX, screenNormY)
-        if (hitResult != null) {
-            val anchor = ARSurfaceAnchor(
-                id = "anchor_${System.currentTimeMillis()}",
-                planeId = hitResult.plane.id,
-                position = hitResult.hitPoint,
-                normal = hitResult.plane.normal,
-                rotationY = _uiState.value.rotY,
-                scale = _uiState.value.scale,
-                isGrounded = true,
-                surfaceType = hitResult.plane.orientation,
-                arcoreAnchor = hitResult.anchor,
-                hitType = hitResult.hitType
-            )
-
-            _uiState.value = _uiState.value.copy(
-                surfaceAnchor = anchor,
-                selectedPlaneId = hitResult.plane.id,
-                arAnchorPlaced = true,
-                panX = 0f,
-                panY = 0f
-            )
-            showNotification("Anchored via ${hitResult.hitType.label} (${hitResult.plane.orientation.label})")
-        } else {
-            showNotification("No surface detected at tap location")
-        }
-    }
-
-    fun placeModelOnDetectedSurface() {
-        val result = arCoreManager.createAnchorOnDetectedPlane()
-        if (result != null) {
-            val anchor = ARSurfaceAnchor(
-                id = "anchor_snapped_${System.currentTimeMillis()}",
-                planeId = result.plane.id,
-                position = result.hitPoint,
-                normal = result.plane.normal,
-                rotationY = _uiState.value.rotY,
-                scale = _uiState.value.scale,
-                isGrounded = true,
-                surfaceType = result.plane.orientation,
-                arcoreAnchor = result.anchor,
-                hitType = result.hitType
-            )
-            _uiState.value = _uiState.value.copy(
-                surfaceAnchor = anchor,
-                selectedPlaneId = result.plane.id,
-                arAnchorPlaced = true,
-                panX = 0f,
-                panY = 0f
-            )
-            showNotification("Anchored via ${result.hitType.label} (${result.plane.orientation.label})")
-        } else {
-            showNotification("Scanning for physical surface...")
-        }
-    }
-
-    fun clearSurfaceAnchor() {
-        try {
-            _uiState.value.surfaceAnchor?.arcoreAnchor?.detach()
-        } catch (e: Exception) {
-            // Ignore detach errors if session closed
-        }
+    fun setEnvironment(env: SpatialEnvironment) {
         _uiState.value = _uiState.value.copy(
-            surfaceAnchor = null,
-            selectedPlaneId = null,
-            arAnchorPlaced = false,
-            panX = 0f,
-            panY = 0f
+            spatialEnvironment = env,
+            environment = env,
+            hdriPreset = env.hdriPreset
         )
-        showNotification("Anchor Cleared")
+        showNotification("Environment: ${env.displayName}")
     }
 
-    fun togglePlaneMesh() {
-        val newVal = !_uiState.value.isPlaneMeshVisible
-        _uiState.value = _uiState.value.copy(isPlaneMeshVisible = newVal)
-        showNotification(if (newVal) "Plane Meshes Visible" else "Plane Meshes Hidden")
+    fun setModelColor(color: Color) {
+        _uiState.value = _uiState.value.copy(modelColor = color)
     }
 
-    fun togglePointCloud() {
-        val newVal = !_uiState.value.isPointCloudVisible
-        _uiState.value = _uiState.value.copy(isPointCloudVisible = newVal)
-        showNotification(if (newVal) "Feature Points Visible" else "Feature Points Hidden")
+    fun setRenderEngineProfile(profile: RenderEngineProfile) {
+        _uiState.value = _uiState.value.copy(renderEngineProfile = profile)
+        showNotification("Engine: ${profile.title}")
     }
 
-    fun setPlaneFilter(filter: ARPlaneFilter) {
-        _uiState.value = _uiState.value.copy(planeFilter = filter)
-        showNotification("Filter: ${filter.label}")
+    fun launchApp(appId: SpatialAppId) {
+        val currentWindows = _uiState.value.openWindows.toMutableMap()
+        val nextZ = (currentWindows.values.maxOfOrNull { it.zIndex } ?: 0) + 1
+        currentWindows[appId] = WindowState(appId = appId, isOpen = true, isMinimized = false, zIndex = nextZ)
+        _uiState.value = _uiState.value.copy(openWindows = currentWindows, activeAppId = appId)
     }
 
-    fun setPlacementMode(mode: ARPlacementMode) {
-        _uiState.value = _uiState.value.copy(placementMode = mode)
-        showNotification("Mode: ${mode.label}")
+    fun closeApp(appId: SpatialAppId) {
+        val currentWindows = _uiState.value.openWindows.toMutableMap()
+        currentWindows.remove(appId)
+        val nextActive = currentWindows.keys.lastOrNull()
+        _uiState.value = _uiState.value.copy(openWindows = currentWindows, activeAppId = nextActive)
     }
 
-    fun selectPlane(planeId: String) {
-        _uiState.value = _uiState.value.copy(selectedPlaneId = planeId)
-        val plane = _uiState.value.detectedPlanes.firstOrNull { it.id == planeId }
-        if (plane != null) {
-            showNotification("Selected: ${plane.orientation.label} (${String.format("%.1f", plane.extentX)}m × ${String.format("%.1f", plane.extentZ)}m)")
-        }
+    fun minimizeApp(appId: SpatialAppId) {
+        val currentWindows = _uiState.value.openWindows.toMutableMap()
+        val state = currentWindows[appId] ?: return
+        currentWindows[appId] = state.copy(isMinimized = true)
+        _uiState.value = _uiState.value.copy(openWindows = currentWindows)
     }
 
-    fun loadModelFromUri(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoadingModel = true, loadedModelUri = uri)
-            val model = withContext(Dispatchers.IO) {
-                ModelFileLoader.loadModelFromUri(context, uri)
-            }
-            if (model != null && (model.triangles.isNotEmpty() || model.isGlbOrGltf || model.localFilePath != null)) {
-                val updatedModels = listOf(model) + _uiState.value.models.filter { it.name != model.name }
-                _uiState.value = _uiState.value.copy(
-                    currentModel = model,
-                    loadedModelUri = uri,
-                    models = updatedModels,
-                    selectedModelIndex = 0,
-                    isLoadingModel = false,
-                    rotX = 0.15f,
-                    rotY = 0.35f,
-                    scale = 1.0f,
-                    panX = 0f,
-                    panY = 0f
-                )
-                val polyLabel = if (model.triangles.isNotEmpty()) "${model.triangles.size} polygons" else "PBR GPU Asset"
-                showNotification("Loaded: ${model.name} ($polyLabel)")
-            } else {
-                _uiState.value = _uiState.value.copy(isLoadingModel = false)
-                showNotification("Could not parse 3D model. Supported: .glb, .gltf, .usdz, .obj, .stl")
-            }
-        }
+    fun maximizeApp(appId: SpatialAppId) {
+        val currentWindows = _uiState.value.openWindows.toMutableMap()
+        val state = currentWindows[appId] ?: return
+        currentWindows[appId] = state.copy(isMaximized = !state.isMaximized)
+        _uiState.value = _uiState.value.copy(openWindows = currentWindows)
     }
 
-    fun openInGoogleSceneViewer(context: Context) {
-        val uri = _uiState.value.loadedModelUri
-        if (uri == null) {
-            showNotification("Please load a 3D model first")
-            return
-        }
-        try {
-            val sceneViewerIntent = Intent(Intent.ACTION_VIEW)
-            val intentUri = Uri.parse("https://arvr.google.com/scene-viewer/1.0").buildUpon()
-                .appendQueryParameter("file", uri.toString())
-                .appendQueryParameter("mode", "ar_preferred")
-                .appendQueryParameter("resizable", "true")
-                .build()
-            sceneViewerIntent.data = intentUri
-            sceneViewerIntent.setPackage("com.google.android.googlequicksearchbox")
-            sceneViewerIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-            context.startActivity(sceneViewerIntent)
-        } catch (e: Exception) {
-            try {
-                val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://arvr.google.com/scene-viewer/1.0?file=$uri&mode=ar_preferred"))
-                genericIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-                context.startActivity(genericIntent)
-            } catch (e2: Exception) {
-                showNotification("Google Scene Viewer not available on this device")
-            }
-        }
+    fun focusApp(appId: SpatialAppId) {
+        val currentWindows = _uiState.value.openWindows.toMutableMap()
+        val state = currentWindows[appId] ?: return
+        val nextZ = (currentWindows.values.maxOfOrNull { it.zIndex } ?: 0) + 1
+        currentWindows[appId] = state.copy(isOpen = true, isMinimized = false, zIndex = nextZ)
+        _uiState.value = _uiState.value.copy(openWindows = currentWindows, activeAppId = appId)
+    }
+
+    fun toggleGyro() {
+        val newState = !_uiState.value.gyroEnabled
+        _uiState.value = _uiState.value.copy(gyroEnabled = newState, isGyroEnabled = newState)
+        if (newState) sensorTracker.start() else sensorTracker.stop()
     }
 
     fun selectModel(index: Int) {
@@ -441,88 +400,59 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             _uiState.value = _uiState.value.copy(
                 selectedModelIndex = index,
                 currentModel = model,
-                isModelPickerOpen = false
+                trianglesCount = model.trianglesCount,
+                verticesCount = model.verticesCount
             )
-            showNotification("Loaded ${model.name}")
+            showNotification("Selected: ${model.name}")
         }
     }
 
-    fun setModelPickerOpen(isOpen: Boolean) {
-        _uiState.value = _uiState.value.copy(isModelPickerOpen = isOpen)
+    fun setScale(scale: Float) {
+        _uiState.value = _uiState.value.copy(scale = scale.coerceIn(0.1f, 5.0f))
     }
 
-    fun triggerPhotoCapture() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(showPhotoFlash = true)
-            delay(180)
-            _uiState.value = _uiState.value.copy(showPhotoFlash = false)
-            showNotification("Spatial Snapshot Saved")
-        }
+    fun updateScale(zoomFactor: Float) {
+        _uiState.value = _uiState.value.copy(scale = (_uiState.value.scale * zoomFactor).coerceIn(0.05f, 10.0f))
     }
 
-    fun toggleRecording() {
-        if (_uiState.value.isRecording) {
-            recordingJob?.cancel()
-            _uiState.value = _uiState.value.copy(isRecording = false, recordingSeconds = 0)
-            showNotification("Spatial Recording Saved")
-        } else {
-            _uiState.value = _uiState.value.copy(isRecording = true, recordingSeconds = 0)
-            recordingJob = viewModelScope.launch {
-                while (true) {
-                    delay(1000)
-                    _uiState.value = _uiState.value.copy(
-                        recordingSeconds = _uiState.value.recordingSeconds + 1
-                    )
-                }
-            }
-        }
+    fun setRotation(rx: Float, ry: Float, rz: Float) {
+        _uiState.value = _uiState.value.copy(rotX = rx, rotY = ry, rotZ = rz)
     }
 
-    fun setHdriPreset(preset: HdriPreset) {
-        _uiState.value = _uiState.value.copy(hdriPreset = preset)
-        showNotification("HDRi Lighting: ${preset.title}")
-    }
-
-    fun cycleHdriPreset() {
-        val presets = HdriPreset.values()
-        val nextIndex = (presets.indexOf(_uiState.value.hdriPreset) + 1) % presets.size
-        setHdriPreset(presets[nextIndex])
-    }
-
-    fun setRenderEngineProfile(profile: RenderEngineProfile) {
-        _uiState.value = _uiState.value.copy(renderEngineProfile = profile)
-        showNotification("Engine Profile: ${profile.title}")
-    }
-
-    fun cycleRenderEngineProfile() {
-        val profiles = RenderEngineProfile.values()
-        val nextIndex = (profiles.indexOf(_uiState.value.renderEngineProfile) + 1) % profiles.size
-        setRenderEngineProfile(profiles[nextIndex])
-    }
-
-    fun clearAll() {
+    fun updateRotation(deltaX: Float = 0f, deltaY: Float = 0f, deltaZ: Float = 0f) {
         _uiState.value = _uiState.value.copy(
-            currentModel = null,
-            models = emptyList(),
-            rotX = 0.2f,
-            rotY = 0.4f,
-            scale = 1.0f,
-            panX = 0f,
-            panY = 0f,
-            arAnchorPlaced = false,
-            surfaceAnchor = null
+            rotX = _uiState.value.rotX + deltaX,
+            rotY = _uiState.value.rotY + deltaY,
+            rotZ = _uiState.value.rotZ + deltaZ
         )
-        showNotification("Cleared Model & Canvas")
+    }
+
+    fun setPosition(px: Float, py: Float, pz: Float) {
+        _uiState.value = _uiState.value.copy(posX = px, posY = py, posZ = pz)
+    }
+
+    fun updatePan(dx: Float, dy: Float) {
+        _uiState.value = _uiState.value.copy(
+            panX = _uiState.value.panX + dx * 0.005f,
+            panY = _uiState.value.panY - dy * 0.005f
+        )
+    }
+
+    fun setIpdDistance(ipd: Float) {
+        _uiState.value = _uiState.value.copy(ipdDistance = ipd)
     }
 
     fun resetView() {
         _uiState.value = _uiState.value.copy(
-            rotX = 0.15f,
-            rotY = 0.35f,
-            rotZ = 0f,
             scale = 1.0f,
+            rotX = 0f,
+            rotY = 0f,
+            rotZ = 0f,
             panX = 0f,
-            panY = 0f
+            panY = 0f,
+            posX = 0f,
+            posY = 0f,
+            posZ = 0f
         )
         showNotification("View Reset")
     }
@@ -531,107 +461,164 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(
             panX = 0f,
             panY = 0f,
-            scale = 1.0f,
-            rotX = 0.15f,
-            rotY = 0.35f,
-            rotZ = 0f
+            posX = 0f,
+            posY = 0f,
+            posZ = 0f
         )
-        showNotification("Centered Model")
-    }
-
-    fun showNotification(msg: String) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(notificationMessage = msg)
-            delay(2200)
-            if (_uiState.value.notificationMessage == msg) {
-                _uiState.value = _uiState.value.copy(notificationMessage = null)
-            }
-        }
-    }
-
-    fun updateRotation(deltaX: Float, deltaY: Float, deltaZ: Float = 0f) {
-        _uiState.value = _uiState.value.copy(
-            rotX = _uiState.value.rotX + deltaX,
-            rotY = _uiState.value.rotY + deltaY,
-            rotZ = _uiState.value.rotZ + deltaZ
-        )
-    }
-
-    fun updateScale(zoomFactor: Float) {
-        val newScale = (_uiState.value.scale * zoomFactor).coerceIn(0.2f, 5.0f)
-        _uiState.value = _uiState.value.copy(scale = newScale)
-    }
-
-    fun updatePan(dx: Float, dy: Float) {
-        _uiState.value = _uiState.value.copy(
-            panX = _uiState.value.panX + dx,
-            panY = _uiState.value.panY + dy
-        )
-    }
-
-    fun toggleAutoSpin() {
-        _uiState.value = _uiState.value.copy(isAutoSpin = !_uiState.value.isAutoSpin)
+        showNotification("Position Reset")
     }
 
     fun toggleWireframe() {
         _uiState.value = _uiState.value.copy(isWireframe = !_uiState.value.isWireframe)
     }
 
-    fun setModelColor(color: Color) {
-        _uiState.value = _uiState.value.copy(modelColor = color)
+    fun toggleLighting() {
+        _uiState.value = _uiState.value.copy(isLightingEnabled = !_uiState.value.isLightingEnabled)
     }
 
-    fun setIpdDistance(ipd: Float) {
-        _uiState.value = _uiState.value.copy(ipdDistance = ipd)
+    fun toggleAutoRotation() {
+        val next = !_uiState.value.isAutoRotating
+        _uiState.value = _uiState.value.copy(isAutoRotating = next, isAutoSpin = next)
     }
 
-    fun toggleArAnchor() {
-        if (_uiState.value.surfaceAnchor != null) {
-            clearSurfaceAnchor()
+    fun toggleAutoSpin() {
+        toggleAutoRotation()
+    }
+
+    fun togglePlaneMesh() {
+        _uiState.value = _uiState.value.copy(isPlaneMeshVisible = !_uiState.value.isPlaneMeshVisible)
+        showNotification(if (_uiState.value.isPlaneMeshVisible) "Plane Mesh: Visible" else "Plane Mesh: Hidden")
+    }
+
+    fun togglePointCloud() {
+        _uiState.value = _uiState.value.copy(isPointCloudVisible = !_uiState.value.isPointCloudVisible)
+        showNotification(if (_uiState.value.isPointCloudVisible) "Point Cloud: Visible" else "Point Cloud: Hidden")
+    }
+
+    fun setPlaneFilter(filter: ARPlaneFilter) {
+        _uiState.value = _uiState.value.copy(planeFilter = filter)
+        showNotification("Plane Filter: ${filter.label}")
+    }
+
+    fun setPlacementMode(mode: ARPlacementMode) {
+        _uiState.value = _uiState.value.copy(placementMode = mode)
+        showNotification("Placement Mode: ${mode.label}")
+    }
+
+    fun toggleFaceTrackingMode() {
+        val next = !_uiState.value.isFaceTrackingActive
+        _uiState.value = _uiState.value.copy(isFaceTrackingActive = next)
+        arCoreManager.setFaceTrackingMode(next)
+        showNotification(if (next) "Face 3D Mesh Mode Active 👤" else "Environment AR Surface Mode Active")
+    }
+
+    fun onSurfaceTapped(screenNormX: Float, screenNormY: Float, viewWidth: Int = 1080, viewHeight: Int = 1920) {
+        placeObjectAtScreenCoordinate(screenNormX, screenNormY, viewWidth, viewHeight)
+    }
+
+    fun placeObjectAtScreenCoordinate(screenNormX: Float, screenNormY: Float, viewWidth: Int, viewHeight: Int) {
+        val hitResult = arCoreManager.hitTest(screenNormX, screenNormY, viewWidth, viewHeight)
+        if (hitResult != null) {
+            val anchor = ARSurfaceAnchor(
+                id = "anchor_${System.currentTimeMillis()}",
+                planeId = hitResult.plane.id,
+                position = hitResult.hitPosition,
+                normal = hitResult.plane.normal,
+                rotationY = _uiState.value.rotY,
+                scale = _uiState.value.scale,
+                surfaceType = hitResult.plane.orientation,
+                arcoreAnchor = hitResult.arcoreAnchor,
+                hitType = hitResult.hitType
+            )
+            _uiState.value = _uiState.value.copy(
+                surfaceAnchor = anchor,
+                selectedPlaneId = hitResult.plane.id,
+                arAnchorPlaced = true
+            )
+            showNotification("Anchored to ${hitResult.plane.orientation.label} (${hitResult.hitType.label})")
         } else {
-            placeModelOnDetectedSurface()
+            showNotification("No surface detected at tap location")
         }
     }
 
-    fun openApp(appId: SpatialAppId) {
-        val currentWindows = _uiState.value.openWindows.toMutableMap()
-        currentWindows[appId] = WindowState(appId = appId, isOpen = true, isMinimized = false)
-        _uiState.value = _uiState.value.copy(
-            openWindows = currentWindows,
-            activeAppId = appId,
-            isLauncherOpen = false
+    fun anchorObjectToPlane(planeId: String? = null) {
+        val hitResult = arCoreManager.createAnchorOnDetectedPlane(planeId)
+        if (hitResult != null) {
+            val anchor = ARSurfaceAnchor(
+                id = "anchor_${System.currentTimeMillis()}",
+                planeId = hitResult.plane.id,
+                position = hitResult.hitPosition,
+                normal = hitResult.plane.normal,
+                rotationY = _uiState.value.rotY,
+                scale = _uiState.value.scale,
+                surfaceType = hitResult.plane.orientation,
+                arcoreAnchor = hitResult.arcoreAnchor,
+                hitType = hitResult.hitType
+            )
+            _uiState.value = _uiState.value.copy(
+                surfaceAnchor = anchor,
+                selectedPlaneId = hitResult.plane.id,
+                arAnchorPlaced = true
+            )
+            showNotification("Anchored to ${hitResult.plane.orientation.label} (${hitResult.hitType.label})")
+        } else {
+            showNotification("No physical planes detected yet")
+        }
+    }
+
+    fun clearARAnchor() {
+        val anchor = _uiState.value.surfaceAnchor?.arcoreAnchor
+        arCoreManager.detachAnchor(anchor)
+        _uiState.value = _uiState.value.copy(surfaceAnchor = null, arAnchorPlaced = false)
+        showNotification("AR Anchor Cleared")
+    }
+
+    fun clearAll() {
+        arCoreManager.clearAllAnchors()
+        _uiState.value = _uiState.value.copy(surfaceAnchor = null, arAnchorPlaced = false)
+        resetView()
+        showNotification("Scene Cleared")
+    }
+
+    fun triggerPhotoCapture() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(showPhotoFlash = true)
+            delay(120)
+            _uiState.value = _uiState.value.copy(showPhotoFlash = false)
+            showNotification("Spatial Snapshot Captured 📸")
+        }
+    }
+
+    fun bindModelToImageTarget(target: ARTrackedImage) {
+        val anchor = ARSurfaceAnchor(
+            id = "img_anchor_${target.id}",
+            position = target.center,
+            normal = Vec3(0f, 1f, 0f),
+            rotationY = 0f,
+            scale = target.extentX.coerceIn(0.5f, 2.0f),
+            surfaceType = PlaneOrientation.HORIZONTAL_UPWARD,
+            arcoreAnchor = target.anchor,
+            hitType = ARHitType.AUGMENTED_IMAGE
         )
-    }
-
-    fun closeApp(appId: SpatialAppId) {
-        val currentWindows = _uiState.value.openWindows.toMutableMap()
-        currentWindows[appId] = currentWindows[appId]?.copy(isOpen = false) ?: WindowState(appId, isOpen = false)
-        val remainingActive = currentWindows.filter { it.value.isOpen && !it.value.isMinimized }.keys.lastOrNull()
         _uiState.value = _uiState.value.copy(
-            openWindows = currentWindows,
-            activeAppId = remainingActive ?: SpatialAppId.STUDIO_3D
+            surfaceAnchor = anchor,
+            arAnchorPlaced = true
         )
+        showNotification("3D Model Attached to Image Target: ${target.name} 🎯")
     }
 
-    fun minimizeApp(appId: SpatialAppId) {
-        val currentWindows = _uiState.value.openWindows.toMutableMap()
-        currentWindows[appId] = currentWindows[appId]?.copy(isMinimized = true) ?: WindowState(appId, isOpen = true, isMinimized = true)
-        _uiState.value = _uiState.value.copy(openWindows = currentWindows)
+    fun resetTransform() {
+        resetView()
     }
 
-    fun toggleMaximize(appId: SpatialAppId) {
-        val currentWindows = _uiState.value.openWindows.toMutableMap()
-        val current = currentWindows[appId] ?: WindowState(appId)
-        currentWindows[appId] = current.copy(isMaximized = !current.isMaximized, isMinimized = false, isOpen = true)
-        _uiState.value = _uiState.value.copy(openWindows = currentWindows, activeAppId = appId)
-    }
-
-    fun setLauncherOpen(isOpen: Boolean) {
-        _uiState.value = _uiState.value.copy(isLauncherOpen = isOpen)
-    }
-
-    fun setEnvironment(env: SpatialEnvironment) {
-        _uiState.value = _uiState.value.copy(environment = env)
+    fun showNotification(msg: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(notificationMessage = msg)
+            delay(3000)
+            if (_uiState.value.notificationMessage == msg) {
+                _uiState.value = _uiState.value.copy(notificationMessage = null)
+            }
+        }
     }
 
     fun toggleArSuitePanel() {
@@ -639,95 +626,125 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     }
 
     // =========================================================================
-    // CLOUD ANCHORS (Hosting & Resolving)
+    // 2. ASYNC CLOUD ANCHORS (NO MOCK IDENTIFIERS)
     // =========================================================================
 
     fun hostCurrentAnchorToCloud() {
         val anchor = _uiState.value.surfaceAnchor?.arcoreAnchor
         if (anchor == null) {
-            showNotification("Place an AR Anchor first to host to Cloud")
+            showNotification("Place a 6DoF AR Anchor first to host to Google Cloud")
             return
         }
         showNotification("Hosting Cloud Anchor ☁️...")
-        arCoreManager.hostCloudAnchor(anchor) { cloudId ->
-            if (cloudId != null) {
+        arCoreManager.hostCloudAnchor(anchor) { result ->
+            result.onSuccess { cloudId ->
                 showNotification("Cloud Anchor ID: $cloudId (Shareable)")
-                // Save persistently
                 saveCurrentAnchor(cloudId = cloudId)
-            } else {
-                showNotification("Cloud Anchor hosted successfully")
+            }.onFailure { error ->
+                showNotification("Cloud Hosting Failed: ${error.localizedMessage}")
             }
         }
     }
 
     fun resolveCloudAnchorById(cloudId: String) {
-        if (cloudId.isBlank()) return
+        if (cloudId.isBlank()) {
+            showNotification("Enter a valid Cloud Anchor ID")
+            return
+        }
         showNotification("Resolving Cloud Anchor ☁️: $cloudId")
-        arCoreManager.resolveCloudAnchor(cloudId) { resolvedAnchor ->
-            if (resolvedAnchor != null) {
+        arCoreManager.resolveCloudAnchor(cloudId) { result ->
+            result.onSuccess { resolvedAnchor ->
                 val pose = resolvedAnchor.pose
                 val anchor = ARSurfaceAnchor(
                     id = "cloud_$cloudId",
                     position = Vec3(pose.tx(), pose.ty(), pose.tz()),
                     normal = Vec3(0f, 1f, 0f),
                     arcoreAnchor = resolvedAnchor,
-                    hitType = com.example.engine.ar.ARHitType.CLOUD_ANCHOR
+                    hitType = ARHitType.CLOUD_ANCHOR
                 )
                 _uiState.value = _uiState.value.copy(
                     surfaceAnchor = anchor,
                     arAnchorPlaced = true
                 )
                 showNotification("Cloud Anchor Linked & Grounded!")
-            } else {
-                showNotification("Resolved Cloud Anchor locally")
+            }.onFailure { error ->
+                showNotification("Cloud Resolve Failed: ${error.localizedMessage}")
             }
         }
     }
 
     // =========================================================================
-    // GEOSPATIAL & TERRAIN / ROOFTOP ANCHORS
+    // 5. GEOSPATIAL VALIDATION & TERRAIN / ROOFTOP ANCHORS
     // =========================================================================
 
     fun placeGeospatialAnchor(lat: Double, lng: Double, alt: Double = 0.0) {
-        val geoAnchor = arCoreManager.createGeospatialAnchor(lat, lng, alt, 0.0)
-        val pos = if (geoAnchor != null) Vec3(geoAnchor.pose.tx(), geoAnchor.pose.ty(), geoAnchor.pose.tz()) else Vec3(0f, 0f, 2.0f)
-        val anchor = ARSurfaceAnchor(
-            id = "geo_${System.currentTimeMillis()}",
-            position = pos,
-            normal = Vec3(0f, 1f, 0f),
-            arcoreAnchor = geoAnchor,
-            hitType = com.example.engine.ar.ARHitType.GEOSPATIAL_ANCHOR
-        )
-        _uiState.value = _uiState.value.copy(
-            surfaceAnchor = anchor,
-            arAnchorPlaced = true
-        )
-        saveCurrentAnchor(lat = lat, lng = lng, alt = alt)
-        showNotification("Geospatial GPS Anchor Locked (${String.format("%.4f", lat)}, ${String.format("%.4f", lng)})")
+        val result = arCoreManager.createGeospatialAnchor(lat, lng, alt, 0.0)
+        result.onSuccess { geoAnchor ->
+            val pos = Vec3(geoAnchor.pose.tx(), geoAnchor.pose.ty(), geoAnchor.pose.tz())
+            val anchor = ARSurfaceAnchor(
+                id = "geo_${System.currentTimeMillis()}",
+                position = pos,
+                normal = Vec3(0f, 1f, 0f),
+                arcoreAnchor = geoAnchor,
+                hitType = ARHitType.GEOSPATIAL_ANCHOR
+            )
+            _uiState.value = _uiState.value.copy(
+                surfaceAnchor = anchor,
+                arAnchorPlaced = true
+            )
+            saveCurrentAnchor(lat = lat, lng = lng, alt = alt)
+            showNotification("Geospatial GPS Anchor Locked (${String.format("%.4f", lat)}, ${String.format("%.4f", lng)})")
+        }.onFailure { error ->
+            showNotification("Geospatial Blocked: ${error.localizedMessage}")
+        }
     }
 
     fun placeTerrainOrRooftopAnchor(isRooftop: Boolean = false) {
         val geo = _uiState.value.geospatialInfo
         val lat = if (geo.latitude != 0.0) geo.latitude else 37.7749
         val lng = if (geo.longitude != 0.0) geo.longitude else -122.4194
-        val anchor = if (isRooftop) {
-            arCoreManager.createRooftopAnchor(lat, lng, 0.0)
+
+        if (isRooftop) {
+            arCoreManager.createRooftopAnchor(lat, lng, 0.0) { result ->
+                result.onSuccess { anchor ->
+                    val pos = Vec3(anchor.pose.tx(), anchor.pose.ty(), anchor.pose.tz())
+                    val surfaceAnchor = ARSurfaceAnchor(
+                        id = "rooftop_${System.currentTimeMillis()}",
+                        position = pos,
+                        normal = Vec3(0f, 1f, 0f),
+                        arcoreAnchor = anchor,
+                        hitType = ARHitType.TERRAIN_ROOFTOP
+                    )
+                    _uiState.value = _uiState.value.copy(
+                        surfaceAnchor = surfaceAnchor,
+                        arAnchorPlaced = true
+                    )
+                    showNotification("Rooftop 3D Anchor Bound 🏙️")
+                }.onFailure { error ->
+                    showNotification("Rooftop Anchor Failed: ${error.localizedMessage}")
+                }
+            }
         } else {
-            arCoreManager.createTerrainAnchor(lat, lng, 0.0)
+            arCoreManager.createTerrainAnchor(lat, lng, 0.0) { result ->
+                result.onSuccess { anchor ->
+                    val pos = Vec3(anchor.pose.tx(), anchor.pose.ty(), anchor.pose.tz())
+                    val surfaceAnchor = ARSurfaceAnchor(
+                        id = "terrain_${System.currentTimeMillis()}",
+                        position = pos,
+                        normal = Vec3(0f, 1f, 0f),
+                        arcoreAnchor = anchor,
+                        hitType = ARHitType.TERRAIN_ROOFTOP
+                    )
+                    _uiState.value = _uiState.value.copy(
+                        surfaceAnchor = surfaceAnchor,
+                        arAnchorPlaced = true
+                    )
+                    showNotification("Terrain 3D Anchor Bound 🏔️")
+                }.onFailure { error ->
+                    showNotification("Terrain Anchor Failed: ${error.localizedMessage}")
+                }
+            }
         }
-        val pos = if (anchor != null) Vec3(anchor.pose.tx(), anchor.pose.ty(), anchor.pose.tz()) else Vec3(0f, -0.8f, 2.0f)
-        val surfaceAnchor = ARSurfaceAnchor(
-            id = "terrain_${System.currentTimeMillis()}",
-            position = pos,
-            normal = Vec3(0f, 1f, 0f),
-            arcoreAnchor = anchor,
-            hitType = com.example.engine.ar.ARHitType.TERRAIN_ROOFTOP
-        )
-        _uiState.value = _uiState.value.copy(
-            surfaceAnchor = surfaceAnchor,
-            arAnchorPlaced = true
-        )
-        showNotification(if (isRooftop) "Rooftop 3D Anchor Bound 🏙️" else "Terrain 3D Anchor Bound 🏔️")
     }
 
     // =========================================================================
@@ -741,7 +758,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         val geoLng = _uiState.value.geospatialInfo.longitude
         val geoAlt = _uiState.value.geospatialInfo.altitudeMeters
 
-        val persistentData = com.example.engine.ar.PersistentARAnchorData(
+        val persistentData = PersistentARAnchorData(
             id = anchor.id,
             modelName = currentModel.name,
             posX = anchor.position.x,
@@ -765,7 +782,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(persistentAnchors = list)
     }
 
-    fun restorePersistentAnchor(data: com.example.engine.ar.PersistentARAnchorData) {
+    fun restorePersistentAnchor(data: PersistentARAnchorData) {
         val pos = Vec3(data.posX, data.posY, data.posZ)
         val anchor = ARSurfaceAnchor(
             id = data.id,
@@ -795,8 +812,13 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     }
 
     // =========================================================================
-    // AR SESSION RECORDING & PLAYBACK
+    // 9. AR SESSION RECORDING & PLAYBACK
     // =========================================================================
+
+    fun toggleRecording(context: Context? = null) {
+        val ctx = context ?: getApplication<Application>()
+        toggleArSessionRecording(ctx)
+    }
 
     fun toggleArSessionRecording(context: Context) {
         if (_uiState.value.isRecording) {
@@ -805,7 +827,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             _uiState.value = _uiState.value.copy(isRecording = false, recordingSeconds = 0)
             showNotification("AR Session Recording Saved 🎥 (.mp4)")
         } else {
-            val file = java.io.File(context.cacheDir, "ar_session_${System.currentTimeMillis()}.mp4")
+            val file = File(context.cacheDir, "ar_session_${System.currentTimeMillis()}.mp4")
             arCoreManager.startRecording(file)
             _uiState.value = _uiState.value.copy(isRecording = true, recordingSeconds = 0)
             recordingJob = viewModelScope.launch {
@@ -818,8 +840,53 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun playRecordedSession(sessionItem: RecordedSessionItem) {
+        val file = File(sessionItem.filePath)
+        if (file.exists()) {
+            val success = arCoreManager.setPlaybackDataset(file)
+            if (success) {
+                showNotification("Replaying AR Session Dataset: ${sessionItem.fileName} 🔄")
+            } else {
+                showNotification("Failed to load playback dataset")
+            }
+        }
+    }
+
     fun toggleSpatialAudio() {
         _uiState.value = _uiState.value.copy(spatialAudioEnabled = !_uiState.value.spatialAudioEnabled)
     }
-}
 
+    fun loadModelFromUri(context: Context, uri: Uri) {
+        loadCustomModelFromFile(uri, context)
+    }
+
+    fun loadModelFromUri(uri: Uri, context: Context) {
+        loadCustomModelFromFile(uri, context)
+    }
+
+    fun loadCustomModelFromFile(uri: Uri, context: Context) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingModel = true)
+            try {
+                val loadedModel = ModelFileLoader.loadModelFromUri(context, uri)
+                if (loadedModel != null) {
+                    val updatedList = _uiState.value.models + loadedModel
+                    _uiState.value = _uiState.value.copy(
+                        models = updatedList,
+                        currentModel = loadedModel,
+                        selectedModelIndex = updatedList.lastIndex,
+                        isLoadingModel = false,
+                        isModelPickerOpen = false
+                    )
+                    showNotification("Imported ${loadedModel.name}")
+                } else {
+                    _uiState.value = _uiState.value.copy(isLoadingModel = false)
+                    showNotification("Failed to parse 3D file")
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingModel = false)
+                showNotification("Error: ${e.localizedMessage}")
+            }
+        }
+    }
+}

@@ -1,6 +1,8 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,7 +21,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.engine.ar.ARTrackingStateQuality
+import com.example.engine.ar.GeospatialValidationResult
 import com.example.engine.ar.PersistentARAnchorData
+import com.example.engine.ar.RecordedSessionItem
+import com.example.engine.ar.SceneSemanticType
 import com.example.viewmodel.MRUiState
 import com.example.viewmodel.MixedRealityViewModel
 
@@ -62,19 +67,26 @@ fun ARSuiteBottomSheet(
                         tint = Color(0xFF4CAF50),
                         modifier = Modifier.size(24.dp)
                     )
-                    Text(
-                        text = "Google ARCore Suite",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    Column {
+                        Text(
+                            text = "Google ARCore 1.47 Suite",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = uiState.capabilities.summary,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray
+                        )
+                    }
                 }
 
                 // Tracking Quality Chip
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = Color(uiState.trackingQuality.colorHex).copy(alpha = 0.2f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(uiState.trackingQuality.colorHex))
+                    border = BorderStroke(1.dp, Color(uiState.trackingQuality.colorHex))
                 ) {
                     Text(
                         text = uiState.trackingQuality.label,
@@ -89,10 +101,11 @@ fun ARSuiteBottomSheet(
             Spacer(modifier = Modifier.height(14.dp))
 
             // Navigation Tabs
-            PrimaryTabRow(
+            ScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = Color(0xFF1E2638),
-                contentColor = Color.White
+                contentColor = Color.White,
+                edgePadding = 0.dp
             ) {
                 Tab(
                     selected = selectedTab == 0,
@@ -102,12 +115,22 @@ fun ARSuiteBottomSheet(
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("Persistent 💾", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                    text = { Text("Semantics & Depth", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
                 )
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    text = { Text("Meshes & Depth", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                    text = { Text("Faces & Targets", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                )
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    text = { Text("Replay & Storage", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                )
+                Tab(
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
+                    text = { Text("Capabilities", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
                 )
             }
 
@@ -126,20 +149,18 @@ fun ARSuiteBottomSheet(
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("Cloud Anchors ☁️ (Multi-User Sharing)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
-                                Text("Host current anchored object to Google Cloud or resolve another device's anchor ID.", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                                Text("Cloud Anchors ☁️ (Async Multi-Device)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                                Text("Host active AR anchor with 300-day cloud TTL or resolve by ID. Explicit error feedback without mock identifiers.", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
 
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(
-                                        onClick = { viewModel.hostCurrentAnchorToCloud() },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3)),
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Host Cloud", fontSize = 12.sp)
-                                    }
+                                Button(
+                                    onClick = { viewModel.hostCurrentAnchorToCloud() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3)),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Host Current 6DoF Anchor to Cloud", fontSize = 12.sp)
                                 }
 
                                 Row(
@@ -173,16 +194,36 @@ fun ARSuiteBottomSheet(
                             }
                         }
 
-                        // Geospatial VPS Card
+                        // Geospatial VPS Card with strict validation check
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2638)),
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Geospatial API & VPS 🌍", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Geospatial API & VPS 🌍", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                                    val isAccurate = uiState.geospatialInfo.isPositionAccurate
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isAccurate) Color(0xFF4CAF50).copy(alpha = 0.2f) else Color(0xFFFF9800).copy(alpha = 0.2f)
+                                    ) {
+                                        Text(
+                                            text = if (isAccurate) "VPS Valid (≤ 5m)" else "Precision ±${String.format("%.1f", uiState.geospatialInfo.horizontalAccuracyMeters)}m",
+                                            color = if (isAccurate) Color(0xFF4CAF50) else Color(0xFFFF9800),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+
                                 val geo = uiState.geospatialInfo
                                 Text(
-                                    text = "Lat: ${if (geo.latitude != 0.0) String.format("%.5f", geo.latitude) else "37.7749"} | Lng: ${if (geo.longitude != 0.0) String.format("%.5f", geo.longitude) else "-122.4194"}\nStatus: ${geo.vpsStatus}",
+                                    text = "Lat: ${if (geo.latitude != 0.0) String.format("%.5f", geo.latitude) else "37.7749"} | Lng: ${if (geo.longitude != 0.0) String.format("%.5f", geo.longitude) else "-122.4194"}\nHeading: ${String.format("%.1f", geo.headingDegrees)}° | Altitude: ${String.format("%.1f", geo.altitudeMeters)}m",
                                     color = Color(0xFF81D4FA),
                                     fontSize = 12.sp
                                 )
@@ -220,95 +261,68 @@ fun ARSuiteBottomSheet(
                 }
 
                 1 -> {
-                    // Persistent Anchors Storage
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Saved Spatial Anchors (${uiState.persistentAnchors.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Button(
-                                onClick = { viewModel.saveCurrentAnchor() },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Save Active", fontSize = 12.sp)
-                            }
-                        }
-
-                        if (uiState.persistentAnchors.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(140.dp)
-                                    .background(Color(0xFF1E2638), RoundedCornerShape(16.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("No saved anchors found.\nAnchor an object and tap 'Save Active'.", color = Color.Gray, fontSize = 13.sp)
-                            }
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(180.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(uiState.persistentAnchors) { anchorData ->
-                                    Card(
-                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2638)),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(10.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column {
-                                                Text(anchorData.modelName, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                                                Text(
-                                                    "${anchorData.hitType.label} • X:${String.format("%.1f", anchorData.posX)} Y:${String.format("%.1f", anchorData.posY)} Z:${String.format("%.1f", anchorData.posZ)}",
-                                                    color = Color.Gray,
-                                                    fontSize = 11.sp
-                                                )
-                                            }
-                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                IconButton(onClick = { viewModel.restorePersistentAnchor(anchorData) }) {
-                                                    Icon(Icons.Default.PlayArrow, contentDescription = "Restore", tint = Color(0xFF4CAF50))
-                                                }
-                                                IconButton(onClick = { viewModel.deletePersistentAnchor(anchorData.id) }) {
-                                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFE57373))
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                2 -> {
-                    // Streetscape Meshes, Depth & AR Recording
+                    // Scene Semantics & Depth Fusion
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        // Scene Semantics Pixel Classifier
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2638)),
                             shape = RoundedCornerShape(16.dp)
                         ) {
-                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("Advanced Depth & Streetscape Geometry 🏢", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("Real-time occlusion enabled: physical obstacles & buildings automatically occlude virtual 3D models.", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Scene Semantics (Image Buffer Classifier) 🧠", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Live classification of camera pixel buffer into structural & environmental layers:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+
+                                val dist = uiState.semanticDistribution
+                                if (dist.isEmpty()) {
+                                    Text("Analyzing camera feed semantics...", color = Color.Gray, fontSize = 12.sp)
+                                } else {
+                                    dist.entries.sortedByDescending { it.value }.take(5).forEach { (type, pct) ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(10.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(type.colorHex))
+                                                )
+                                                Text(type.label, fontSize = 12.sp, color = Color.White)
+                                            }
+                                            Text("${String.format("%.1f", pct)}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(type.colorHex))
+                                        }
+                                        LinearProgressIndicator(
+                                            progress = { pct / 100f },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(6.dp)
+                                                .clip(RoundedCornerShape(3.dp)),
+                                            color = Color(type.colorHex),
+                                            trackColor = Color.White.copy(alpha = 0.1f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Depth Fusion & Streetscape Mesh
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2638)),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Geospatial Depth Fusion & Streetscape Mesh 🏢", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                val depth = uiState.depthFusionInfo
+                                Text(
+                                    text = "16-bit Sensor Depth: Avg ${String.format("%.2f", depth.averageDepthMeters)}m | Closest Obstacle: ${String.format("%.2f", depth.closestObjectDistanceMeters)}m\nOcclusion Ratio: ${String.format("%.1f", depth.occlusionRatioPercentage)}% | VPS Depth Fused: ${depth.isGeospatialDepthFused}",
+                                    color = Color(0xFF81D4FA),
+                                    fontSize = 12.sp
+                                )
 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     FilledTonalButton(
@@ -328,36 +342,219 @@ fun ARSuiteBottomSheet(
                                 }
                             }
                         }
+                    }
+                }
 
-                        // AR Recording Card
+                2 -> {
+                    // Augmented Faces & Augmented Images
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Augmented Face Tracking Card
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2638)),
                             shape = RoundedCornerShape(16.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(14.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text("AR Session Recording 🎥", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text(
-                                        if (uiState.isRecording) "Recording dataset... (${uiState.recordingSeconds}s)" else "Capture camera feeds & IMU dataset",
-                                        color = if (uiState.isRecording) Color(0xFFF44336) else Color.Gray,
-                                        fontSize = 11.sp
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Augmented Faces (468-point 3D Mesh) 👤", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Switch(
+                                        checked = uiState.isFaceTrackingActive,
+                                        onCheckedChange = { viewModel.toggleFaceTrackingMode() }
                                     )
                                 }
-                                Button(
-                                    onClick = { viewModel.toggleArSessionRecording(context) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = if (uiState.isRecording) Color(0xFFF44336) else Color(0xFF2196F3)),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(if (uiState.isRecording) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(if (uiState.isRecording) "Stop" else "Record", fontSize = 12.sp)
+                                val face = uiState.faceTracking
+                                Text(
+                                    text = if (face.isTracking) "Face Locked: 468 Landmarks Active | Nose Pose (Z: ${String.format("%.2f", face.noseTipPose.z)})" else "Face tracking inactive. Toggle switch to track selfie face mesh.",
+                                    color = if (face.isTracking) Color(0xFF4CAF50) else Color.Gray,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        // Augmented Images Targets
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2638)),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Augmented Image Targets 🎯", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Pre-configured markers (QR, Tech Card, Blueprint). When in camera view, tap to bind 3D models:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+
+                                if (uiState.trackedImages.isEmpty()) {
+                                    Text("Point camera at target marker (e.g. AR_TARGET_QR)...", color = Color.Gray, fontSize = 12.sp)
+                                } else {
+                                    LazyColumn(modifier = Modifier.fillMaxWidth().height(120.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(uiState.trackedImages) { img ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().background(Color(0xFF28334A), RoundedCornerShape(10.dp)).padding(8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column {
+                                                    Text(img.name, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+                                                    Text("${img.trackingMethod} • Extent: ${String.format("%.2f", img.extentX)}m", color = Color(0xFF81D4FA), fontSize = 10.sp)
+                                                }
+                                                Button(
+                                                    onClick = { viewModel.bindModelToImageTarget(img) },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Bind 3D Model", fontSize = 11.sp)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                3 -> {
+                    // Replay & Persistent Storage
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // AR Recording & Playback Card
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2638)),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text("AR Session Recording 🎥", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text(
+                                            if (uiState.isRecording) "Recording session dataset (${uiState.recordingSeconds}s)..." else "Record sensor feeds & camera frames",
+                                            color = if (uiState.isRecording) Color(0xFFF44336) else Color.Gray,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    Button(
+                                        onClick = { viewModel.toggleArSessionRecording(context) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = if (uiState.isRecording) Color(0xFFF44336) else Color(0xFF2196F3)),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(if (uiState.isRecording) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(if (uiState.isRecording) "Stop" else "Record", fontSize = 12.sp)
+                                    }
+                                }
+
+                                if (uiState.recordedSessions.isNotEmpty()) {
+                                    Text("Saved Dataset Recordings (${uiState.recordedSessions.size}):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    LazyColumn(modifier = Modifier.fillMaxWidth().height(100.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(uiState.recordedSessions) { item ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().background(Color(0xFF28334A), RoundedCornerShape(8.dp)).padding(8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column {
+                                                    Text(item.fileName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                                    Text("Size: ${item.fileSizeFormatted}", fontSize = 10.sp, color = Color.Gray)
+                                                }
+                                                IconButton(onClick = { viewModel.playRecordedSession(item) }) {
+                                                    Icon(Icons.Default.PlayArrow, contentDescription = "Replay", tint = Color(0xFF4CAF50))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Persistent Anchors Card
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2638)),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Saved Spatial Anchors (${uiState.persistentAnchors.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Button(
+                                        onClick = { viewModel.saveCurrentAnchor() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Save Active", fontSize = 11.sp)
+                                    }
+                                }
+
+                                if (uiState.persistentAnchors.isEmpty()) {
+                                    Text("No saved anchors in local database.", color = Color.Gray, fontSize = 11.sp)
+                                } else {
+                                    LazyColumn(modifier = Modifier.fillMaxWidth().height(100.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(uiState.persistentAnchors) { anchorData ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().background(Color(0xFF28334A), RoundedCornerShape(8.dp)).padding(8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column {
+                                                    Text(anchorData.modelName, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
+                                                    Text("${anchorData.hitType.label} • X:${String.format("%.1f", anchorData.posX)} Y:${String.format("%.1f", anchorData.posY)}", color = Color.Gray, fontSize = 10.sp)
+                                                }
+                                                Row {
+                                                    IconButton(onClick = { viewModel.restorePersistentAnchor(anchorData) }) {
+                                                        Icon(Icons.Default.Refresh, contentDescription = "Restore", tint = Color(0xFF4CAF50))
+                                                    }
+                                                    IconButton(onClick = { viewModel.deletePersistentAnchor(anchorData.id) }) {
+                                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFE57373))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                4 -> {
+                    // Automated Hardware Capabilities Matrix
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2638)),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Automated ARCore Capability Matrix 🔍", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Hardware and platform support verified at runtime:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+
+                                val caps = uiState.capabilities
+                                CapabilityRow("ARCore Google Play Services", caps.isArCoreInstalled)
+                                CapabilityRow("Depth API & Occlusion", caps.isDepthSupported)
+                                CapabilityRow("Raw Depth 16-bit", caps.isRawDepthSupported)
+                                CapabilityRow("Geospatial API & VPS", caps.isGeospatialSupported)
+                                CapabilityRow("Scene Semantics", caps.isSemanticSupported)
+                                CapabilityRow("Cloud Anchors", caps.isCloudAnchorSupported)
+                                CapabilityRow("Augmented Faces (3D Mesh)", caps.isAugmentedFacesSupported)
+                                CapabilityRow("Augmented Images", caps.isAugmentedImagesSupported)
+                                CapabilityRow("Streetscape Geometry", caps.isStreetscapeSupported)
+                                CapabilityRow("Instant Placement", caps.isInstantPlacementSupported)
                             }
                         }
                     }
@@ -365,6 +562,29 @@ fun ARSuiteBottomSheet(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun CapabilityRow(label: String, isSupported: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 12.sp, color = Color.White)
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (isSupported) Color(0xFF4CAF50).copy(alpha = 0.2f) else Color(0xFFF44336).copy(alpha = 0.2f)
+        ) {
+            Text(
+                text = if (isSupported) "SUPPORTED ✓" else "NOT AVAILABLE ✗",
+                color = if (isSupported) Color(0xFF4CAF50) else Color(0xFFF44336),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
         }
     }
 }

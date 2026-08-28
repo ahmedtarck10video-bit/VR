@@ -26,9 +26,11 @@ enum class ARHitType(val label: String) {
     FEATURE_POINT("Feature Point Normal"),
     INSTANT_PLACEMENT("Instant Placement"),
     AUGMENTED_IMAGE("Image Target Anchor"),
+    AUGMENTED_FACE("Face 3D Mesh Anchor"),
     CLOUD_ANCHOR("Cloud Anchor ☁️"),
     GEOSPATIAL_ANCHOR("Geospatial GPS 🌍"),
     TERRAIN_ROOFTOP("Terrain / Rooftop 🏙️"),
+    STREETSCAPE_MESH("Streetscape Geometry"),
     GEOMETRIC_FALLBACK("Sensor Approximation")
 }
 
@@ -51,8 +53,33 @@ enum class SceneSemanticType(val label: String, val colorHex: Long) {
     SIDEWALK("Pedestrian Sidewalk", 0xFF009688),
     TERRAIN("Natural Ground / Soil", 0xFF795548),
     STRUCTURE("Architectural Structure", 0xFF3F51B5),
+    OBJECT("Physical Object", 0xFFFF9800),
     VEHICLE("Moving Vehicle", 0xFFE91E63),
-    PERSON("Human Person", 0xFFFF5722)
+    PERSON("Human Person", 0xFFFF5722),
+    WATER("Water Surface", 0xFF00BCD4)
+}
+
+data class ARCoreCapabilities(
+    val isArCoreInstalled: Boolean = false,
+    val isDepthSupported: Boolean = false,
+    val isRawDepthSupported: Boolean = false,
+    val isGeospatialSupported: Boolean = false,
+    val isSemanticSupported: Boolean = false,
+    val isCloudAnchorSupported: Boolean = false,
+    val isAugmentedFacesSupported: Boolean = false,
+    val isAugmentedImagesSupported: Boolean = true,
+    val isInstantPlacementSupported: Boolean = true,
+    val isStreetscapeSupported: Boolean = false,
+    val summary: String = "Checking Hardware Capabilities..."
+)
+
+sealed class GeospatialValidationResult {
+    data class Valid(val latitude: Double, val longitude: Double, val altitude: Double, val accuracyMeters: Float) : GeospatialValidationResult()
+    data class LowAccuracy(val horizontalAccuracyMeters: Float, val requiredAccuracyMeters: Float = 5.0f) : GeospatialValidationResult()
+    object VPSNotAvailable : GeospatialValidationResult()
+    object EarthNotTracking : GeospatialValidationResult()
+    object ServiceUnavailable : GeospatialValidationResult()
+    object PermissionDenied : GeospatialValidationResult()
 }
 
 data class ARGeospatialInfo(
@@ -60,11 +87,13 @@ data class ARGeospatialInfo(
     val longitude: Double = 0.0,
     val altitudeMeters: Double = 0.0,
     val headingDegrees: Double = 0.0,
-    val horizontalAccuracyMeters: Float = 1.0f,
-    val verticalAccuracyMeters: Float = 1.0f,
-    val headingAccuracyDegrees: Float = 5.0f,
+    val horizontalAccuracyMeters: Float = 999.0f,
+    val verticalAccuracyMeters: Float = 999.0f,
+    val headingAccuracyDegrees: Float = 999.0f,
     val isVPSAvailable: Boolean = false,
-    val vpsStatus: String = "VPS Ready"
+    val isPositionAccurate: Boolean = false,
+    val vpsStatus: String = "Acquiring VPS...",
+    val lastValidationResult: GeospatialValidationResult = GeospatialValidationResult.EarthNotTracking
 )
 
 data class ARStreetscapeMesh(
@@ -73,15 +102,29 @@ data class ARStreetscapeMesh(
     val center: Vec3,
     val verticesCount: Int,
     val trianglesCount: Int,
+    val meshVertices: List<Vec3> = emptyList(),
     val isOcclusionActive: Boolean = true
 )
 
 data class ARFaceMeshTracking(
     val isTracking: Boolean = false,
-    val facePose: Vec3 = Vec3(0f, 0f, 1f),
+    val faceCenterPose: Vec3 = Vec3(0f, 0f, 1f),
+    val noseTipPose: Vec3 = Vec3(0f, 0f, 0.95f),
+    val foreheadLeftPose: Vec3 = Vec3(-0.04f, 0.06f, 0.98f),
+    val foreheadRightPose: Vec3 = Vec3(0.04f, 0.06f, 0.98f),
     val landmarksCount: Int = 468,
-    val leftEyeOpen: Float = 1.0f,
-    val rightEyeOpen: Float = 1.0f
+    val landmarkMeshPoints: List<Vec3> = emptyList(),
+    val leftEyeOpenRatio: Float = 1.0f,
+    val rightEyeOpenRatio: Float = 1.0f
+)
+
+data class ARDepthFusionInfo(
+    val isDepthActive: Boolean = false,
+    val rawDepthAvailable: Boolean = false,
+    val averageDepthMeters: Float = 1.8f,
+    val closestObjectDistanceMeters: Float = 0.5f,
+    val occlusionRatioPercentage: Float = 0.0f,
+    val isGeospatialDepthFused: Boolean = false
 )
 
 data class PersistentARAnchorData(
@@ -107,7 +150,17 @@ data class ARTrackedImage(
     val extentX: Float,
     val extentZ: Float,
     val isTracking: Boolean,
+    val trackingMethod: String = "FULL_TRACKING",
     val anchor: com.google.ar.core.Anchor? = null
+)
+
+data class RecordedSessionItem(
+    val id: String,
+    val fileName: String,
+    val filePath: String,
+    val fileSizeFormatted: String,
+    val durationSeconds: Int,
+    val timestamp: Long
 )
 
 data class ARTrackedPlane(

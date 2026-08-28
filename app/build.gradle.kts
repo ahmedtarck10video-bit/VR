@@ -73,7 +73,7 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
     // Google ARCore for Real-time Plane Detection & Spatial Surface Tracking
-    implementation("com.google.ar:core:1.41.0")
+    implementation("com.google.ar:core:1.47.0")
 
     // Sceneview 3D and AR with Filament PBR Engine
     implementation("io.github.sceneview:sceneview:2.2.1")
