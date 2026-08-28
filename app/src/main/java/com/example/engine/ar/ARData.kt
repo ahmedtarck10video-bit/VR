@@ -25,8 +25,19 @@ enum class ARHitType(val label: String) {
     DEPTH_POINT("Depth API Surface"),
     FEATURE_POINT("Feature Point Normal"),
     INSTANT_PLACEMENT("Instant Placement"),
+    AUGMENTED_IMAGE("Image Target Anchor"),
     GEOMETRIC_FALLBACK("Sensor Approximation")
 }
+
+data class ARTrackedImage(
+    val id: String,
+    val name: String,
+    val center: Vec3,
+    val extentX: Float,
+    val extentZ: Float,
+    val isTracking: Boolean,
+    val anchor: com.google.ar.core.Anchor? = null
+)
 
 data class ARTrackedPlane(
     val id: String,

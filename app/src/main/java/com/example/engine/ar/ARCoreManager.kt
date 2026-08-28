@@ -27,6 +27,9 @@ class ARCoreManager(private val context: Context) {
     private val _trackedPlanes = MutableStateFlow<List<ARTrackedPlane>>(emptyList())
     val trackedPlanes: StateFlow<List<ARTrackedPlane>> = _trackedPlanes.asStateFlow()
 
+    private val _trackedImages = MutableStateFlow<List<ARTrackedImage>>(emptyList())
+    val trackedImages: StateFlow<List<ARTrackedImage>> = _trackedImages.asStateFlow()
+
     private val _pointCloud = MutableStateFlow<List<Vec3>>(emptyList())
     val pointCloud: StateFlow<List<Vec3>> = _pointCloud.asStateFlow()
 
@@ -208,7 +211,33 @@ class ARCoreManager(private val context: Context) {
 
         _trackedPlanes.value = planeList
 
-        // 2. Process Point Cloud
+        // 2. Process Augmented Images from ARCore
+        try {
+            val allImages = currentSession.getAllTrackables(AugmentedImage::class.java)
+            val imageList = mutableListOf<ARTrackedImage>()
+            for (image in allImages) {
+                if (image.trackingState == TrackingState.TRACKING) {
+                    val pose = image.centerPose
+                    val anchor = try { image.createAnchor(pose) } catch (e: Exception) { null }
+                    imageList.add(
+                        ARTrackedImage(
+                            id = "image_target_${image.index}_${image.name}",
+                            name = image.name ?: "Target_${image.index}",
+                            center = Vec3(pose.tx(), pose.ty(), pose.tz()),
+                            extentX = image.extentX,
+                            extentZ = image.extentZ,
+                            isTracking = true,
+                            anchor = anchor
+                        )
+                    )
+                }
+            }
+            _trackedImages.value = imageList
+        } catch (e: Exception) {
+            // Ignore if image database not set
+        }
+
+        // 3. Process Point Cloud
         try {
             val pc = frame.acquirePointCloud()
             val pointsBuffer = pc.points
@@ -285,13 +314,30 @@ class ARCoreManager(private val context: Context) {
                 val pixelY = screenNormY * viewHeightPx
                 val hitResults = frame.hitTest(pixelX, pixelY)
 
+                var bestImageHit: HitResult? = null
                 var bestDepthHit: HitResult? = null
                 var bestPointHit: HitResult? = null
                 var bestInstantHit: HitResult? = null
 
-                // Tier 1: Look for exact Plane Polygon Hit first
+                // Tier 1: Look for exact Plane Polygon Hit or Image Target Hit first
                 for (hit in hitResults) {
                     val trackable = hit.trackable
+                    if (trackable is AugmentedImage) {
+                        val hitPose = hit.hitPose
+                        val hitVec = Vec3(hitPose.tx(), hitPose.ty(), hitPose.tz())
+                        val anchor = try { hit.createAnchor() } catch (e: Exception) { null }
+                        val syntheticPlane = ARTrackedPlane(
+                            id = "image_target_${trackable.index}",
+                            center = hitVec,
+                            normal = Vec3(0f, 1f, 0f),
+                            extentX = trackable.extentX,
+                            extentZ = trackable.extentZ,
+                            polygon = emptyList(),
+                            orientation = PlaneOrientation.HORIZONTAL_UPWARD
+                        )
+                        return HitResultData(syntheticPlane, hitVec, anchor, ARHitType.AUGMENTED_IMAGE)
+                    }
+
                     if (trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) {
                         val hitPose = hit.hitPose
                         val hitVec = Vec3(hitPose.tx(), hitPose.ty(), hitPose.tz())
