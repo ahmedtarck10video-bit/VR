@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:sceneview="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- Camera passthrough surface -->
-    <TextureView
-        android:id="@+id/camera_texture_view"
+    <!-- ARSceneView from SceneView provides camera passthrough, renderer, and Filament integration -->
+    <io.github.sceneview.ar.ARSceneView
+        android:id="@+id/ar_scene_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:keepScreenOn="true" />
+        sceneview:enableDepth="true" />
 
     <!-- Overlay controls -->
     <LinearLayout
