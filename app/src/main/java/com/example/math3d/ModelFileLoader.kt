@@ -36,7 +36,7 @@ object ModelFileLoader {
         val displayName = formatCleanName(rawName)
         val lowerName = rawName.lowercase()
         val isZip = lowerName.endsWith(".zip") || lowerName.endsWith(".usdz")
-        val isGlbOrGltf = lowerName.endsWith(".glb") || lowerName.endsWith(".gltf") || isZip
+        val isNativeSceneAsset = lowerName.endsWith(".glb") || lowerName.endsWith(".gltf") || isZip
 
         var cachedFile: java.io.File? = null
         try {
@@ -46,7 +46,8 @@ object ModelFileLoader {
 
             if (isZip) {
                 val bundleFolder = java.io.File(modelsDir, "bundle_${uriHash}_${rawName.substringBeforeLast('.')}")
-                if (bundleFolder.exists() && bundleFolder.isDirectory && (bundleFolder.listFiles()?.isNotEmpty() == true)) {
+                val completeMarker = java.io.File(bundleFolder, ".complete")
+                if (bundleFolder.exists() && bundleFolder.isDirectory && completeMarker.exists()) {
                     cachedFile = findMainModelInFolder(bundleFolder)
                 }
                 if (cachedFile == null) {
@@ -80,7 +81,7 @@ object ModelFileLoader {
 
         // Fast path for native GLB / GLTF / USDZ / ZIP packages:
         // Pass directly to SceneView / Filament ModelLoader without CPU triangle conversion!
-        if (isGlbOrGltf && finalFilePath != null && java.io.File(finalFilePath).exists()) {
+        if (isNativeSceneAsset && finalFilePath != null && java.io.File(finalFilePath).exists()) {
             val file = java.io.File(finalFilePath)
             val extractedDims = extractGltfOrGlbDimensions(file)
             val realW = extractedDims?.first ?: 0.5f
@@ -247,32 +248,80 @@ object ModelFileLoader {
             var overallMaxZ = -Float.MAX_VALUE
             var found = false
 
-            // Strategy 1: Compute bounds transformed by node hierarchy (scale / translation)
+            fun updateBounds(x: Float, y: Float, z: Float) {
+                overallMinX = min(overallMinX, x)
+                overallMinY = min(overallMinY, y)
+                overallMinZ = min(overallMinZ, z)
+                overallMaxX = max(overallMaxX, x)
+                overallMaxY = max(overallMaxY, y)
+                overallMaxZ = max(overallMaxZ, z)
+                found = true
+            }
+
+            // Strategy 1: Compute bounds transformed by node hierarchy (matrix, quaternion rotation, scale, translation)
             if (nodes != null && meshBounds.isNotEmpty()) {
                 for (n in 0 until nodes.length()) {
                     val node = nodes.optJSONObject(n) ?: continue
                     val meshIdx = node.optInt("mesh", -1)
                     val b = meshBounds[meshIdx]
                     if (b != null) {
-                        // Extract node scale if present
-                        val scaleArr = node.optJSONArray("scale")
-                        val sx = if (scaleArr != null && scaleArr.length() >= 3) abs(scaleArr.getDouble(0).toFloat()) else 1.0f
-                        val sy = if (scaleArr != null && scaleArr.length() >= 3) abs(scaleArr.getDouble(1).toFloat()) else 1.0f
-                        val sz = if (scaleArr != null && scaleArr.length() >= 3) abs(scaleArr.getDouble(2).toFloat()) else 1.0f
+                        val corners = arrayOf(
+                            floatArrayOf(b[0], b[1], b[2]),
+                            floatArrayOf(b[0], b[1], b[5]),
+                            floatArrayOf(b[0], b[4], b[2]),
+                            floatArrayOf(b[0], b[4], b[5]),
+                            floatArrayOf(b[3], b[1], b[2]),
+                            floatArrayOf(b[3], b[1], b[5]),
+                            floatArrayOf(b[3], b[4], b[2]),
+                            floatArrayOf(b[3], b[4], b[5])
+                        )
 
-                        // Extract translation if present
-                        val transArr = node.optJSONArray("translation")
-                        val tx = if (transArr != null && transArr.length() >= 3) transArr.getDouble(0).toFloat() else 0.0f
-                        val ty = if (transArr != null && transArr.length() >= 3) transArr.getDouble(1).toFloat() else 0.0f
-                        val tz = if (transArr != null && transArr.length() >= 3) transArr.getDouble(2).toFloat() else 0.0f
+                        val matrixArr = node.optJSONArray("matrix")
+                        if (matrixArr != null && matrixArr.length() >= 16) {
+                            val m0 = matrixArr.getDouble(0).toFloat(); val m4 = matrixArr.getDouble(4).toFloat(); val m8 = matrixArr.getDouble(8).toFloat(); val m12 = matrixArr.getDouble(12).toFloat()
+                            val m1 = matrixArr.getDouble(1).toFloat(); val m5 = matrixArr.getDouble(5).toFloat(); val m9 = matrixArr.getDouble(9).toFloat(); val m13 = matrixArr.getDouble(13).toFloat()
+                            val m2 = matrixArr.getDouble(2).toFloat(); val m6 = matrixArr.getDouble(6).toFloat(); val m10 = matrixArr.getDouble(10).toFloat(); val m14 = matrixArr.getDouble(14).toFloat()
 
-                        overallMinX = min(overallMinX, b[0] * sx + tx)
-                        overallMinY = min(overallMinY, b[1] * sy + ty)
-                        overallMinZ = min(overallMinZ, b[2] * sz + tz)
-                        overallMaxX = max(overallMaxX, b[3] * sx + tx)
-                        overallMaxY = max(overallMaxY, b[4] * sy + ty)
-                        overallMaxZ = max(overallMaxZ, b[5] * sz + tz)
-                        found = true
+                            for (c in corners) {
+                                val cx = c[0]; val cy = c[1]; val cz = c[2]
+                                val tx = m0 * cx + m4 * cy + m8 * cz + m12
+                                val ty = m1 * cx + m5 * cy + m9 * cz + m13
+                                val tz = m2 * cx + m6 * cy + m10 * cz + m14
+                                updateBounds(tx, ty, tz)
+                            }
+                        } else {
+                            val scaleArr = node.optJSONArray("scale")
+                            val sx = if (scaleArr != null && scaleArr.length() >= 3) scaleArr.getDouble(0).toFloat() else 1.0f
+                            val sy = if (scaleArr != null && scaleArr.length() >= 3) scaleArr.getDouble(1).toFloat() else 1.0f
+                            val sz = if (scaleArr != null && scaleArr.length() >= 3) scaleArr.getDouble(2).toFloat() else 1.0f
+
+                            val rotArr = node.optJSONArray("rotation")
+                            val hasRot = rotArr != null && rotArr.length() >= 4
+                            val qx = if (hasRot) rotArr!!.getDouble(0).toFloat() else 0f
+                            val qy = if (hasRot) rotArr!!.getDouble(1).toFloat() else 0f
+                            val qz = if (hasRot) rotArr!!.getDouble(2).toFloat() else 0f
+                            val qw = if (hasRot) rotArr!!.getDouble(3).toFloat() else 1f
+
+                            val transArr = node.optJSONArray("translation")
+                            val tx = if (transArr != null && transArr.length() >= 3) transArr.getDouble(0).toFloat() else 0.0f
+                            val ty = if (transArr != null && transArr.length() >= 3) transArr.getDouble(1).toFloat() else 0.0f
+                            val tz = if (transArr != null && transArr.length() >= 3) transArr.getDouble(2).toFloat() else 0.0f
+
+                            for (c in corners) {
+                                var cx = c[0] * sx
+                                var cy = c[1] * sy
+                                var cz = c[2] * sz
+
+                                if (hasRot) {
+                                    val rx = (1f - 2f * (qy * qy + qz * qz)) * cx + (2f * (qx * qy - qz * qw)) * cy + (2f * (qx * qz + qy * qw)) * cz
+                                    val ry = (2f * (qx * qy + qz * qw)) * cx + (1f - 2f * (qx * qx + qz * qz)) * cy + (2f * (qy * qz - qx * qw)) * cz
+                                    val rz = (2f * (qx * qz - qy * qw)) * cx + (2f * (qy * qz + qx * qw)) * cy + (1f - 2f * (qx * qx + qy * qy)) * cz
+                                    cx = rx; cy = ry; cz = rz
+                                }
+
+                                updateBounds(cx + tx, cy + ty, cz + tz)
+                            }
+                        }
                     }
                 }
             }
@@ -280,13 +329,8 @@ object ModelFileLoader {
             // Strategy 2: Fall back to raw mesh bounding boxes if nodes don't reference meshes directly
             if (!found && meshBounds.isNotEmpty()) {
                 for (b in meshBounds.values) {
-                    overallMinX = min(overallMinX, b[0])
-                    overallMinY = min(overallMinY, b[1])
-                    overallMinZ = min(overallMinZ, b[2])
-                    overallMaxX = max(overallMaxX, b[3])
-                    overallMaxY = max(overallMaxY, b[4])
-                    overallMaxZ = max(overallMaxZ, b[5])
-                    found = true
+                    updateBounds(b[0], b[1], b[2])
+                    updateBounds(b[3], b[4], b[5])
                 }
             }
 
@@ -299,13 +343,8 @@ object ModelFileLoader {
                         val minArr = acc.optJSONArray("min")
                         val maxArr = acc.optJSONArray("max")
                         if (minArr != null && maxArr != null && minArr.length() >= 3 && maxArr.length() >= 3) {
-                            overallMinX = min(overallMinX, minArr.getDouble(0).toFloat())
-                            overallMinY = min(overallMinY, minArr.getDouble(1).toFloat())
-                            overallMinZ = min(overallMinZ, minArr.getDouble(2).toFloat())
-                            overallMaxX = max(overallMaxX, maxArr.getDouble(0).toFloat())
-                            overallMaxY = max(overallMaxY, maxArr.getDouble(1).toFloat())
-                            overallMaxZ = max(overallMaxZ, maxArr.getDouble(2).toFloat())
-                            found = true
+                            updateBounds(minArr.getDouble(0).toFloat(), minArr.getDouble(1).toFloat(), minArr.getDouble(2).toFloat())
+                            updateBounds(maxArr.getDouble(0).toFloat(), maxArr.getDouble(1).toFloat(), maxArr.getDouble(2).toFloat())
                         }
                     }
                 }
@@ -435,6 +474,14 @@ object ModelFileLoader {
             ?: candidates.firstOrNull { it.name.lowercase().endsWith(".gltf") }
             ?: candidates.firstOrNull { it.name.lowercase().endsWith(".obj") }
             ?: candidates.firstOrNull()
+
+        if (mainModelFile != null) {
+            try {
+                java.io.File(extractFolder, ".complete").createNewFile()
+            } catch (e: Exception) {
+                // Ignore marker creation failure
+            }
+        }
 
         return mainModelFile
     }

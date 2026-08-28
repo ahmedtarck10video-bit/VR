@@ -316,4 +316,51 @@ class ARCoreManager(private val context: Context) {
         // Return null when ray does not intersect any detected physical plane
         return null
     }
+
+    /**
+     * Creates a genuine ARCore Anchor directly on a detected physical plane (e.g. for automatic snap placement).
+     */
+    fun createAnchorOnDetectedPlane(planeId: String? = null): Triple<ARTrackedPlane, Vec3, Anchor?>? {
+        val currentSession = session
+        val planes = _trackedPlanes.value
+        if (planes.isEmpty()) return null
+
+        if (currentSession != null && isSessionRunning) {
+            try {
+                val allPlanes = currentSession.getAllTrackables(Plane::class.java)
+                val matchedTrackable = if (planeId != null) {
+                    allPlanes.firstOrNull { p: Plane -> "arcore_plane_${p.hashCode()}" == planeId && p.trackingState == com.google.ar.core.TrackingState.TRACKING }
+                } else {
+                    allPlanes.firstOrNull { p: Plane -> p.type == Plane.Type.HORIZONTAL_UPWARD_FACING && p.trackingState == com.google.ar.core.TrackingState.TRACKING }
+                        ?: allPlanes.firstOrNull { p: Plane -> p.trackingState == com.google.ar.core.TrackingState.TRACKING }
+                }
+
+                if (matchedTrackable != null) {
+                    val anchor = matchedTrackable.createAnchor(matchedTrackable.centerPose)
+                    val targetPlaneId = "arcore_plane_${matchedTrackable.hashCode()}"
+                    val matchedPlane = planes.firstOrNull { it.id == targetPlaneId } ?: ARTrackedPlane(
+                        id = targetPlaneId,
+                        center = Vec3(matchedTrackable.centerPose.tx(), matchedTrackable.centerPose.ty(), matchedTrackable.centerPose.tz()),
+                        normal = Vec3(0f, 1f, 0f),
+                        extentX = matchedTrackable.extentX,
+                        extentZ = matchedTrackable.extentZ,
+                        polygon = emptyList(),
+                        orientation = if (matchedTrackable.type == Plane.Type.VERTICAL) PlaneOrientation.VERTICAL else PlaneOrientation.HORIZONTAL_UPWARD
+                    )
+                    val centerVec = Vec3(matchedTrackable.centerPose.tx(), matchedTrackable.centerPose.ty(), matchedTrackable.centerPose.tz())
+                    return Triple(matchedPlane, centerVec, anchor)
+                }
+            } catch (e: Exception) {
+                // Fallback to geometric plane center
+            }
+        }
+
+        val fallbackPlane = if (planeId != null) {
+            planes.firstOrNull { it.id == planeId }
+        } else {
+            planes.firstOrNull { it.orientation == PlaneOrientation.HORIZONTAL_UPWARD } ?: planes.firstOrNull()
+        } ?: return null
+
+        return Triple(fallbackPlane, fallbackPlane.center, null)
+    }
 }

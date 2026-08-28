@@ -271,20 +271,19 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun placeModelOnDetectedSurface() {
-        val planes = _uiState.value.detectedPlanes
-        val targetPlane = planes.firstOrNull { it.orientation == PlaneOrientation.HORIZONTAL_UPWARD }
-            ?: planes.firstOrNull()
-
-        if (targetPlane != null) {
+        val result = arCoreManager.createAnchorOnDetectedPlane()
+        if (result != null) {
+            val (targetPlane, centerPos, arAnchor) = result
             val anchor = ARSurfaceAnchor(
-                id = "anchor_snapped",
+                id = "anchor_snapped_${System.currentTimeMillis()}",
                 planeId = targetPlane.id,
-                position = targetPlane.center,
+                position = centerPos,
                 normal = targetPlane.normal,
                 rotationY = _uiState.value.rotY,
                 scale = _uiState.value.scale,
                 isGrounded = true,
-                surfaceType = targetPlane.orientation
+                surfaceType = targetPlane.orientation,
+                arcoreAnchor = arAnchor
             )
             _uiState.value = _uiState.value.copy(
                 surfaceAnchor = anchor,
@@ -300,10 +299,17 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun clearSurfaceAnchor() {
+        try {
+            _uiState.value.surfaceAnchor?.arcoreAnchor?.detach()
+        } catch (e: Exception) {
+            // Ignore detach errors if session closed
+        }
         _uiState.value = _uiState.value.copy(
             surfaceAnchor = null,
             selectedPlaneId = null,
-            arAnchorPlaced = false
+            arAnchorPlaced = false,
+            panX = 0f,
+            panY = 0f
         )
         showNotification("Anchor Cleared")
     }

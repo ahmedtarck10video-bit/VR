@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.engine.ar.ARSurfaceAnchor
+import com.example.engine.ar.PlaneOrientation
 import com.example.math3d.Model3D
 import com.example.ui.theme.GlowGreen
 import com.example.ui.theme.NeonCyan
@@ -108,20 +109,27 @@ fun SceneviewARViewport(
                     val targetModel = model
                     val targetPath = targetModel?.localFilePath ?: targetModel?.fileUri?.toString()
 
-                    // Compute true 3D position (live ARCore anchor pose with 6DOF persistence or placed at camera preview depth)
+                    // Compute true 3D position (live ARCore anchor pose with 6DOF persistence and anchor-local pan)
                     val liveAnchorPose = surfaceAnchor?.arcoreAnchor?.pose
                     val targetPos = if (surfaceAnchor != null && isAnchored) {
+                        val isVertical = surfaceAnchor.surfaceType == PlaneOrientation.VERTICAL
+                        val localDx = panX * 0.001f
+                        val localDy = if (isVertical) -panY * 0.001f else 0f
+                        val localDz = if (!isVertical) panY * 0.001f else 0f
+
                         if (liveAnchorPose != null) {
+                            val localOffsetPose = com.google.ar.core.Pose.makeTranslation(localDx, localDy, localDz)
+                            val combinedPose = liveAnchorPose.compose(localOffsetPose)
                             Position(
-                                x = liveAnchorPose.tx() + (panX * 0.001f),
-                                y = liveAnchorPose.ty() - (panY * 0.001f),
-                                z = liveAnchorPose.tz()
+                                x = combinedPose.tx(),
+                                y = combinedPose.ty(),
+                                z = combinedPose.tz()
                             )
                         } else {
                             Position(
-                                x = surfaceAnchor.position.x + (panX * 0.001f),
-                                y = surfaceAnchor.position.y - (panY * 0.001f),
-                                z = surfaceAnchor.position.z
+                                x = surfaceAnchor.position.x + localDx,
+                                y = surfaceAnchor.position.y + localDy,
+                                z = surfaceAnchor.position.z + localDz
                             )
                         }
                     } else {
