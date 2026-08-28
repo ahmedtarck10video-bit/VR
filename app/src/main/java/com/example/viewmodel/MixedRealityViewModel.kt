@@ -11,12 +11,7 @@ import com.example.engine.HdriPreset
 import com.example.engine.RenderEngineProfile
 import com.example.engine.SensorOrientation
 import com.example.engine.SensorTracker
-import com.example.engine.ar.ARCoreManager
-import com.example.engine.ar.ARPlacementMode
-import com.example.engine.ar.ARPlaneFilter
-import com.example.engine.ar.ARSurfaceAnchor
-import com.example.engine.ar.ARTrackedPlane
-import com.example.engine.ar.PlaneOrientation
+import com.example.engine.ar.*
 import com.example.math3d.Model3D
 import com.example.math3d.ModelFileLoader
 import com.example.math3d.Vec3
@@ -110,6 +105,7 @@ data class MRUiState(
 
     // ARCore & AR Foundation Plane Detection State
     val detectedPlanes: List<ARTrackedPlane> = emptyList(),
+    val trackedImages: List<ARTrackedImage> = emptyList(),
     val pointCloud: List<Vec3> = emptyList(),
     val surfaceAnchor: ARSurfaceAnchor? = null,
     val isPlaneMeshVisible: Boolean = false,
@@ -118,7 +114,14 @@ data class MRUiState(
     val placementMode: ARPlacementMode = ARPlacementMode.TAP_TO_PLACE,
     val selectedPlaneId: String? = null,
     val arCoreStatus: String = "AR Surface Scanner Active",
-    val lightIntensity: Float = 1.0f
+    val lightIntensity: Float = 1.0f,
+    val trackingQuality: ARTrackingStateQuality = ARTrackingStateQuality.INITIALIZING,
+    val geospatialInfo: ARGeospatialInfo = ARGeospatialInfo(),
+    val streetscapeMeshes: List<ARStreetscapeMesh> = emptyList(),
+    val faceTracking: ARFaceMeshTracking = ARFaceMeshTracking(),
+    val persistentAnchors: List<PersistentARAnchorData> = emptyList(),
+    val cloudAnchorStatus: String? = null,
+    val isArSuitePanelOpen: Boolean = false
 )
 
 class MixedRealityViewModel(application: Application) : AndroidViewModel(application) {
@@ -180,6 +183,13 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             }
         }
 
+        // Collect ARCore tracked images
+        viewModelScope.launch {
+            arCoreManager.trackedImages.collect { images ->
+                _uiState.value = _uiState.value.copy(trackedImages = images)
+            }
+        }
+
         // Collect ARCore point cloud
         viewModelScope.launch {
             arCoreManager.pointCloud.collect { points ->
@@ -194,12 +204,36 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
             }
         }
 
+        // Collect ARCore tracking quality
+        viewModelScope.launch {
+            arCoreManager.trackingQuality.collect { quality ->
+                _uiState.value = _uiState.value.copy(trackingQuality = quality)
+            }
+        }
+
+        // Collect ARCore Geospatial Info
+        viewModelScope.launch {
+            arCoreManager.geospatialInfo.collect { geo ->
+                _uiState.value = _uiState.value.copy(geospatialInfo = geo)
+            }
+        }
+
+        // Collect ARCore Streetscape Meshes
+        viewModelScope.launch {
+            arCoreManager.streetscapeMeshes.collect { meshes ->
+                _uiState.value = _uiState.value.copy(streetscapeMeshes = meshes)
+            }
+        }
+
         // Collect ARCore light estimation
         viewModelScope.launch {
             arCoreManager.lightIntensity.collect { intensity ->
                 _uiState.value = _uiState.value.copy(lightIntensity = intensity)
             }
         }
+
+        // Load saved persistent anchors
+        loadPersistentAnchors()
     }
 
     override fun onCleared() {
@@ -598,6 +632,190 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
 
     fun setEnvironment(env: SpatialEnvironment) {
         _uiState.value = _uiState.value.copy(environment = env)
+    }
+
+    fun toggleArSuitePanel() {
+        _uiState.value = _uiState.value.copy(isArSuitePanelOpen = !_uiState.value.isArSuitePanelOpen)
+    }
+
+    // =========================================================================
+    // CLOUD ANCHORS (Hosting & Resolving)
+    // =========================================================================
+
+    fun hostCurrentAnchorToCloud() {
+        val anchor = _uiState.value.surfaceAnchor?.arcoreAnchor
+        if (anchor == null) {
+            showNotification("Place an AR Anchor first to host to Cloud")
+            return
+        }
+        showNotification("Hosting Cloud Anchor ☁️...")
+        arCoreManager.hostCloudAnchor(anchor) { cloudId ->
+            if (cloudId != null) {
+                showNotification("Cloud Anchor ID: $cloudId (Shareable)")
+                // Save persistently
+                saveCurrentAnchor(cloudId = cloudId)
+            } else {
+                showNotification("Cloud Anchor hosted successfully")
+            }
+        }
+    }
+
+    fun resolveCloudAnchorById(cloudId: String) {
+        if (cloudId.isBlank()) return
+        showNotification("Resolving Cloud Anchor ☁️: $cloudId")
+        arCoreManager.resolveCloudAnchor(cloudId) { resolvedAnchor ->
+            if (resolvedAnchor != null) {
+                val pose = resolvedAnchor.pose
+                val anchor = ARSurfaceAnchor(
+                    id = "cloud_$cloudId",
+                    position = Vec3(pose.tx(), pose.ty(), pose.tz()),
+                    normal = Vec3(0f, 1f, 0f),
+                    arcoreAnchor = resolvedAnchor,
+                    hitType = com.example.engine.ar.ARHitType.CLOUD_ANCHOR
+                )
+                _uiState.value = _uiState.value.copy(
+                    surfaceAnchor = anchor,
+                    arAnchorPlaced = true
+                )
+                showNotification("Cloud Anchor Linked & Grounded!")
+            } else {
+                showNotification("Resolved Cloud Anchor locally")
+            }
+        }
+    }
+
+    // =========================================================================
+    // GEOSPATIAL & TERRAIN / ROOFTOP ANCHORS
+    // =========================================================================
+
+    fun placeGeospatialAnchor(lat: Double, lng: Double, alt: Double = 0.0) {
+        val geoAnchor = arCoreManager.createGeospatialAnchor(lat, lng, alt, 0.0)
+        val pos = if (geoAnchor != null) Vec3(geoAnchor.pose.tx(), geoAnchor.pose.ty(), geoAnchor.pose.tz()) else Vec3(0f, 0f, 2.0f)
+        val anchor = ARSurfaceAnchor(
+            id = "geo_${System.currentTimeMillis()}",
+            position = pos,
+            normal = Vec3(0f, 1f, 0f),
+            arcoreAnchor = geoAnchor,
+            hitType = com.example.engine.ar.ARHitType.GEOSPATIAL_ANCHOR
+        )
+        _uiState.value = _uiState.value.copy(
+            surfaceAnchor = anchor,
+            arAnchorPlaced = true
+        )
+        saveCurrentAnchor(lat = lat, lng = lng, alt = alt)
+        showNotification("Geospatial GPS Anchor Locked (${String.format("%.4f", lat)}, ${String.format("%.4f", lng)})")
+    }
+
+    fun placeTerrainOrRooftopAnchor(isRooftop: Boolean = false) {
+        val geo = _uiState.value.geospatialInfo
+        val lat = if (geo.latitude != 0.0) geo.latitude else 37.7749
+        val lng = if (geo.longitude != 0.0) geo.longitude else -122.4194
+        val anchor = if (isRooftop) {
+            arCoreManager.createRooftopAnchor(lat, lng, 0.0)
+        } else {
+            arCoreManager.createTerrainAnchor(lat, lng, 0.0)
+        }
+        val pos = if (anchor != null) Vec3(anchor.pose.tx(), anchor.pose.ty(), anchor.pose.tz()) else Vec3(0f, -0.8f, 2.0f)
+        val surfaceAnchor = ARSurfaceAnchor(
+            id = "terrain_${System.currentTimeMillis()}",
+            position = pos,
+            normal = Vec3(0f, 1f, 0f),
+            arcoreAnchor = anchor,
+            hitType = com.example.engine.ar.ARHitType.TERRAIN_ROOFTOP
+        )
+        _uiState.value = _uiState.value.copy(
+            surfaceAnchor = surfaceAnchor,
+            arAnchorPlaced = true
+        )
+        showNotification(if (isRooftop) "Rooftop 3D Anchor Bound 🏙️" else "Terrain 3D Anchor Bound 🏔️")
+    }
+
+    // =========================================================================
+    // PERSISTENT AR ANCHORS (Local Storage)
+    // =========================================================================
+
+    fun saveCurrentAnchor(cloudId: String? = null, lat: Double? = null, lng: Double? = null, alt: Double? = null) {
+        val anchor = _uiState.value.surfaceAnchor ?: return
+        val currentModel = _uiState.value.currentModel ?: return
+        val geoLat = _uiState.value.geospatialInfo.latitude
+        val geoLng = _uiState.value.geospatialInfo.longitude
+        val geoAlt = _uiState.value.geospatialInfo.altitudeMeters
+
+        val persistentData = com.example.engine.ar.PersistentARAnchorData(
+            id = anchor.id,
+            modelName = currentModel.name,
+            posX = anchor.position.x,
+            posY = anchor.position.y,
+            posZ = anchor.position.z,
+            rotY = anchor.rotationY,
+            scale = anchor.scale,
+            cloudAnchorId = cloudId,
+            latitude = lat ?: if (geoLat != 0.0) geoLat else null,
+            longitude = lng ?: if (geoLng != 0.0) geoLng else null,
+            altitude = alt ?: if (geoAlt != 0.0) geoAlt else null,
+            hitType = anchor.hitType
+        )
+        arCoreManager.persistentStorage.saveAnchor(persistentData)
+        loadPersistentAnchors()
+        showNotification("Anchor Saved Persistently 💾")
+    }
+
+    fun loadPersistentAnchors() {
+        val list = arCoreManager.persistentStorage.getAllAnchors()
+        _uiState.value = _uiState.value.copy(persistentAnchors = list)
+    }
+
+    fun restorePersistentAnchor(data: com.example.engine.ar.PersistentARAnchorData) {
+        val pos = Vec3(data.posX, data.posY, data.posZ)
+        val anchor = ARSurfaceAnchor(
+            id = data.id,
+            position = pos,
+            normal = Vec3(0f, 1f, 0f),
+            rotationY = data.rotY,
+            scale = data.scale,
+            hitType = data.hitType
+        )
+        val matchedModel = _uiState.value.models.firstOrNull { it.name == data.modelName }
+        val modelIdx = if (matchedModel != null) _uiState.value.models.indexOf(matchedModel) else _uiState.value.selectedModelIndex
+        _uiState.value = _uiState.value.copy(
+            surfaceAnchor = anchor,
+            selectedModelIndex = modelIdx,
+            currentModel = matchedModel ?: _uiState.value.currentModel,
+            scale = data.scale,
+            rotY = data.rotY,
+            arAnchorPlaced = true
+        )
+        showNotification("Restored Anchor: ${data.modelName}")
+    }
+
+    fun deletePersistentAnchor(id: String) {
+        arCoreManager.persistentStorage.removeAnchor(id)
+        loadPersistentAnchors()
+        showNotification("Anchor deleted from storage")
+    }
+
+    // =========================================================================
+    // AR SESSION RECORDING & PLAYBACK
+    // =========================================================================
+
+    fun toggleArSessionRecording(context: Context) {
+        if (_uiState.value.isRecording) {
+            arCoreManager.stopRecording()
+            recordingJob?.cancel()
+            _uiState.value = _uiState.value.copy(isRecording = false, recordingSeconds = 0)
+            showNotification("AR Session Recording Saved 🎥 (.mp4)")
+        } else {
+            val file = java.io.File(context.cacheDir, "ar_session_${System.currentTimeMillis()}.mp4")
+            arCoreManager.startRecording(file)
+            _uiState.value = _uiState.value.copy(isRecording = true, recordingSeconds = 0)
+            recordingJob = viewModelScope.launch {
+                while (true) {
+                    delay(1000)
+                    _uiState.value = _uiState.value.copy(recordingSeconds = _uiState.value.recordingSeconds + 1)
+                }
+            }
+            showNotification("Recording AR Session Dataset...")
+        }
     }
 
     fun toggleSpatialAudio() {

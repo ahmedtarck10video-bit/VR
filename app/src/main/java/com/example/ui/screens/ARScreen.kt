@@ -104,46 +104,76 @@ fun ARScreen(
                     .padding(16.dp),
                 contentAlignment = Alignment.TopCenter
             ) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color.Black.copy(alpha = 0.65f),
-                    contentColor = Color.White,
-                    tonalElevation = 6.dp,
-                    modifier = Modifier.padding(top = 8.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color.Black.copy(alpha = 0.65f),
+                        contentColor = Color.White,
+                        tonalElevation = 6.dp
                     ) {
-                        val anchor = uiState.surfaceAnchor
-                        if (anchor != null) {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(CircleShape)
-                                    .background(if (anchor.isReal6DOFTracking) Color(0xFF4CAF50) else Color(0xFFFFB300))
-                            )
-                            Text(
-                                text = "${anchor.hitType.label} • ${anchor.surfaceType.label}",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF2196F3))
-                            )
-                            Text(
-                                text = "Tap any surface or object to Anchor",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Medium
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            val anchor = uiState.surfaceAnchor
+                            if (anchor != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(if (anchor.isReal6DOFTracking) Color(0xFF4CAF50) else Color(0xFFFFB300))
+                                )
+                                Text(
+                                    text = "${anchor.hitType.label} • ${anchor.surfaceType.label}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF2196F3))
+                                )
+                                Text(
+                                    text = "Tap surface to Anchor",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
                     }
+
+                    // AR Suite Tools Quick Toggle Button
+                    IconButton(
+                        onClick = { viewModel.toggleArSuitePanel() },
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.65f), CircleShape)
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                    ) {
+                        Icon(
+                            Icons.Default.Tune,
+                            contentDescription = "AR Suite",
+                            tint = Color(0xFF4CAF50)
+                        )
+                    }
                 }
+            }
+
+            // AR Suite Bottom Sheet modal
+            if (uiState.isArSuitePanelOpen) {
+                com.example.ui.components.ARSuiteBottomSheet(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    onDismiss = { viewModel.toggleArSuitePanel() }
+                )
             }
         } else {
             Box(

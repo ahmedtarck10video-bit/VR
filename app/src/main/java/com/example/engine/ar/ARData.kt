@@ -26,8 +26,79 @@ enum class ARHitType(val label: String) {
     FEATURE_POINT("Feature Point Normal"),
     INSTANT_PLACEMENT("Instant Placement"),
     AUGMENTED_IMAGE("Image Target Anchor"),
+    CLOUD_ANCHOR("Cloud Anchor ☁️"),
+    GEOSPATIAL_ANCHOR("Geospatial GPS 🌍"),
+    TERRAIN_ROOFTOP("Terrain / Rooftop 🏙️"),
     GEOMETRIC_FALLBACK("Sensor Approximation")
 }
+
+enum class ARTrackingStateQuality(val label: String, val colorHex: Long) {
+    EXCELLENT("Excellent Tracking (6DoF)", 0xFF4CAF50),
+    GOOD("Good Surface Tracking", 0xFF8BC34A),
+    LOW_LIGHT("Warning: Low Light Environment", 0xFFFF9800),
+    EXCESSIVE_MOTION("Warning: Excessive Device Motion", 0xFFFF5722),
+    INSUFFICIENT_FEATURES("Searching for Physical Features...", 0xFFFFC107),
+    INITIALIZING("Initializing ARCore...", 0xFF2196F3),
+    PAUSED_OR_LOST("Tracking Lost - Relocalizing...", 0xFFF44336)
+}
+
+enum class SceneSemanticType(val label: String, val colorHex: Long) {
+    UNLABELED("Background", 0xFF9E9E9E),
+    SKY("Sky", 0xFF03A9F4),
+    BUILDING("Building Structure", 0xFF9C27B0),
+    TREE("Vegetation / Tree", 0xFF4CAF50),
+    ROAD("Paved Road", 0xFF607D8B),
+    SIDEWALK("Pedestrian Sidewalk", 0xFF009688),
+    TERRAIN("Natural Ground / Soil", 0xFF795548),
+    STRUCTURE("Architectural Structure", 0xFF3F51B5),
+    VEHICLE("Moving Vehicle", 0xFFE91E63),
+    PERSON("Human Person", 0xFFFF5722)
+}
+
+data class ARGeospatialInfo(
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val altitudeMeters: Double = 0.0,
+    val headingDegrees: Double = 0.0,
+    val horizontalAccuracyMeters: Float = 1.0f,
+    val verticalAccuracyMeters: Float = 1.0f,
+    val headingAccuracyDegrees: Float = 5.0f,
+    val isVPSAvailable: Boolean = false,
+    val vpsStatus: String = "VPS Ready"
+)
+
+data class ARStreetscapeMesh(
+    val id: String,
+    val type: String, // BUILDING or TERRAIN
+    val center: Vec3,
+    val verticesCount: Int,
+    val trianglesCount: Int,
+    val isOcclusionActive: Boolean = true
+)
+
+data class ARFaceMeshTracking(
+    val isTracking: Boolean = false,
+    val facePose: Vec3 = Vec3(0f, 0f, 1f),
+    val landmarksCount: Int = 468,
+    val leftEyeOpen: Float = 1.0f,
+    val rightEyeOpen: Float = 1.0f
+)
+
+data class PersistentARAnchorData(
+    val id: String,
+    val modelName: String,
+    val posX: Float,
+    val posY: Float,
+    val posZ: Float,
+    val rotY: Float,
+    val scale: Float,
+    val cloudAnchorId: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val altitude: Double? = null,
+    val hitType: ARHitType = ARHitType.PLANE_POLYGON,
+    val timestamp: Long = System.currentTimeMillis()
+)
 
 data class ARTrackedImage(
     val id: String,
