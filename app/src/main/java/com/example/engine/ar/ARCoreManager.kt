@@ -1,6 +1,7 @@
 package com.example.engine.ar
 
 import android.content.Context
+import android.graphics.Bitmap
 import com.example.math3d.Vec3
 import com.google.ar.core.*
 import com.google.ar.core.exceptions.*
@@ -14,8 +15,10 @@ import kotlin.math.*
  * Handles:
  * - ARCore availability check and Session lifecycle
  * - Horizontal & Vertical plane detection with convex polygon extraction
+ * - Augmented Images recognition & tracking with AugmentedImageDatabase
  * - Real-time 3D feature point cloud sampling
- * - Screen-to-surface raycasting and hit testing
+ * - Google Depth API & Instant Placement
+ * - Screen-to-surface cascade raycasting and hit testing
  * - Continuous visual-inertial fallback tracking when running in virtualized environments
  */
 class ARCoreManager(private val context: Context) {
@@ -23,6 +26,7 @@ class ARCoreManager(private val context: Context) {
     private var session: Session? = null
     private var isARCoreAvailable: Boolean = false
     private var isSessionRunning: Boolean = false
+    private var imageDatabase: AugmentedImageDatabase? = null
 
     private val _trackedPlanes = MutableStateFlow<List<ARTrackedPlane>>(emptyList())
     val trackedPlanes: StateFlow<List<ARTrackedPlane>> = _trackedPlanes.asStateFlow()
@@ -91,6 +95,16 @@ class ARCoreManager(private val context: Context) {
                         instantPlacementMode = Config.InstantPlacementMode.LOCAL_Y_UP
                     } catch (e: Exception) {
                         // Instant Placement not supported
+                    }
+
+                    // Enable Augmented Image Database for 2D Image Tracking
+                    try {
+                        val db = imageDatabase ?: AugmentedImageDatabase(newSession).also {
+                            imageDatabase = it
+                        }
+                        augmentedImageDatabase = db
+                    } catch (e: Exception) {
+                        // Augmented Image Database not supported or failed to init
                     }
                 }
                 newSession.configure(config)
@@ -527,4 +541,28 @@ class ARCoreManager(private val context: Context) {
 
         return HitResultData(fallbackPlane, fallbackPlane.center, null, ARHitType.GEOMETRIC_FALLBACK)
     }
+
+    /**
+     * Adds an image target (e.g. marker / poster / logo) to the active ARCore Augmented Image Database.
+     */
+    fun addImageTarget(name: String, bitmap: Bitmap, physicalWidthMeters: Float = 0.2f): Boolean {
+        val currentSession = session ?: return false
+        return try {
+            val db = imageDatabase ?: AugmentedImageDatabase(currentSession).also {
+                imageDatabase = it
+            }
+            db.addImage(name, bitmap, physicalWidthMeters)
+            val config = currentSession.config
+            config.augmentedImageDatabase = db
+            currentSession.configure(config)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Checks if ARCore Augmented Image tracking is active and has registered targets.
+     */
+    fun hasAugmentedImagesDatabase(): Boolean = (imageDatabase != null && (imageDatabase?.numImages ?: 0) > 0)
 }
