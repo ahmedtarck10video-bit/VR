@@ -12,6 +12,7 @@ import java.io.InputStreamReader
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.ZipInputStream
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -163,7 +164,7 @@ object ModelFileLoader {
 
     /**
      * Extracts precise real-world metric dimensions (bounding box width, height, depth)
-     * directly from GLB / GLTF binary / JSON headers without CPU triangle conversion.
+     * directly from GLB / GLTF binary / JSON headers, taking into account scene node transforms.
      */
     fun extractGltfOrGlbDimensions(file: java.io.File): Triple<Float, Float, Float>? {
         return try {
@@ -201,20 +202,18 @@ object ModelFileLoader {
             val root = JSONObject(jsonString)
             val accessors = root.optJSONArray("accessors") ?: return null
             val meshes = root.optJSONArray("meshes")
+            val nodes = root.optJSONArray("nodes")
 
-            var overallMinX = Float.MAX_VALUE
-            var overallMinY = Float.MAX_VALUE
-            var overallMinZ = Float.MAX_VALUE
-            var overallMaxX = -Float.MAX_VALUE
-            var overallMaxY = -Float.MAX_VALUE
-            var overallMaxZ = -Float.MAX_VALUE
-            var found = false
-
-            // Strategy 1: Check accessors referenced as "POSITION" in mesh primitives
+            // Map each mesh index to its local bounding box (minX, minY, minZ, maxX, maxY, maxZ)
+            val meshBounds = mutableMapOf<Int, FloatArray>()
             if (meshes != null) {
                 for (m in 0 until meshes.length()) {
                     val mesh = meshes.optJSONObject(m) ?: continue
                     val primitives = mesh.optJSONArray("primitives") ?: continue
+                    var mMinX = Float.MAX_VALUE; var mMinY = Float.MAX_VALUE; var mMinZ = Float.MAX_VALUE
+                    var mMaxX = -Float.MAX_VALUE; var mMaxY = -Float.MAX_VALUE; var mMaxZ = -Float.MAX_VALUE
+                    var meshHasPos = false
+
                     for (p in 0 until primitives.length()) {
                         val prim = primitives.optJSONObject(p) ?: continue
                         val attributes = prim.optJSONObject("attributes") ?: continue
@@ -224,20 +223,74 @@ object ModelFileLoader {
                             val minArr = acc.optJSONArray("min")
                             val maxArr = acc.optJSONArray("max")
                             if (minArr != null && maxArr != null && minArr.length() >= 3 && maxArr.length() >= 3) {
-                                overallMinX = min(overallMinX, minArr.getDouble(0).toFloat())
-                                overallMinY = min(overallMinY, minArr.getDouble(1).toFloat())
-                                overallMinZ = min(overallMinZ, minArr.getDouble(2).toFloat())
-                                overallMaxX = max(overallMaxX, maxArr.getDouble(0).toFloat())
-                                overallMaxY = max(overallMaxY, maxArr.getDouble(1).toFloat())
-                                overallMaxZ = max(overallMaxZ, maxArr.getDouble(2).toFloat())
-                                found = true
+                                mMinX = min(mMinX, minArr.getDouble(0).toFloat())
+                                mMinY = min(mMinY, minArr.getDouble(1).toFloat())
+                                mMinZ = min(mMinZ, minArr.getDouble(2).toFloat())
+                                mMaxX = max(mMaxX, maxArr.getDouble(0).toFloat())
+                                mMaxY = max(mMaxY, maxArr.getDouble(1).toFloat())
+                                mMaxZ = max(mMaxZ, maxArr.getDouble(2).toFloat())
+                                meshHasPos = true
                             }
                         }
+                    }
+                    if (meshHasPos) {
+                        meshBounds[m] = floatArrayOf(mMinX, mMinY, mMinZ, mMaxX, mMaxY, mMaxZ)
                     }
                 }
             }
 
-            // Strategy 2: Scan all accessors of type VEC3 with min/max
+            var overallMinX = Float.MAX_VALUE
+            var overallMinY = Float.MAX_VALUE
+            var overallMinZ = Float.MAX_VALUE
+            var overallMaxX = -Float.MAX_VALUE
+            var overallMaxY = -Float.MAX_VALUE
+            var overallMaxZ = -Float.MAX_VALUE
+            var found = false
+
+            // Strategy 1: Compute bounds transformed by node hierarchy (scale / translation)
+            if (nodes != null && meshBounds.isNotEmpty()) {
+                for (n in 0 until nodes.length()) {
+                    val node = nodes.optJSONObject(n) ?: continue
+                    val meshIdx = node.optInt("mesh", -1)
+                    val b = meshBounds[meshIdx]
+                    if (b != null) {
+                        // Extract node scale if present
+                        val scaleArr = node.optJSONArray("scale")
+                        val sx = if (scaleArr != null && scaleArr.length() >= 3) abs(scaleArr.getDouble(0).toFloat()) else 1.0f
+                        val sy = if (scaleArr != null && scaleArr.length() >= 3) abs(scaleArr.getDouble(1).toFloat()) else 1.0f
+                        val sz = if (scaleArr != null && scaleArr.length() >= 3) abs(scaleArr.getDouble(2).toFloat()) else 1.0f
+
+                        // Extract translation if present
+                        val transArr = node.optJSONArray("translation")
+                        val tx = if (transArr != null && transArr.length() >= 3) transArr.getDouble(0).toFloat() else 0.0f
+                        val ty = if (transArr != null && transArr.length() >= 3) transArr.getDouble(1).toFloat() else 0.0f
+                        val tz = if (transArr != null && transArr.length() >= 3) transArr.getDouble(2).toFloat() else 0.0f
+
+                        overallMinX = min(overallMinX, b[0] * sx + tx)
+                        overallMinY = min(overallMinY, b[1] * sy + ty)
+                        overallMinZ = min(overallMinZ, b[2] * sz + tz)
+                        overallMaxX = max(overallMaxX, b[3] * sx + tx)
+                        overallMaxY = max(overallMaxY, b[4] * sy + ty)
+                        overallMaxZ = max(overallMaxZ, b[5] * sz + tz)
+                        found = true
+                    }
+                }
+            }
+
+            // Strategy 2: Fall back to raw mesh bounding boxes if nodes don't reference meshes directly
+            if (!found && meshBounds.isNotEmpty()) {
+                for (b in meshBounds.values) {
+                    overallMinX = min(overallMinX, b[0])
+                    overallMinY = min(overallMinY, b[1])
+                    overallMinZ = min(overallMinZ, b[2])
+                    overallMaxX = max(overallMaxX, b[3])
+                    overallMaxY = max(overallMaxY, b[4])
+                    overallMaxZ = max(overallMaxZ, b[5])
+                    found = true
+                }
+            }
+
+            // Strategy 3: Scan all accessors of type VEC3 with min/max
             if (!found) {
                 for (a in 0 until accessors.length()) {
                     val acc = accessors.optJSONObject(a) ?: continue
@@ -258,10 +311,10 @@ object ModelFileLoader {
                 }
             }
 
-            if (found && overallMaxX > overallMinX && overallMaxY > overallMinY) {
-                val w = max(0.01f, overallMaxX - overallMinX)
-                val h = max(0.01f, overallMaxY - overallMinY)
-                val d = max(0.01f, if (overallMaxZ >= overallMinZ) overallMaxZ - overallMinZ else 0.05f)
+            if (found && overallMaxX >= overallMinX && overallMaxY >= overallMinY && overallMaxZ >= overallMinZ) {
+                val w = max(0.001f, overallMaxX - overallMinX)
+                val h = max(0.001f, overallMaxY - overallMinY)
+                val d = max(0.001f, overallMaxZ - overallMinZ)
                 Triple(w, h, d)
             } else {
                 null
@@ -333,6 +386,7 @@ object ModelFileLoader {
     /**
      * Extracts a ZIP / USDZ archive into an isolated folder so glTF relative companion
      * resources (.bin, textures, .png, .jpg) are preserved in place for Filament / Sceneview.
+     * Includes Zip-Slip vulnerability prevention.
      */
     private fun extractZipAndFindMainModel(
         inputStream: InputStream,
@@ -340,6 +394,7 @@ object ModelFileLoader {
         archiveName: String
     ): java.io.File? {
         extractFolder.mkdirs()
+        val canonicalExtractDir = extractFolder.canonicalPath
 
         var mainModelFile: java.io.File? = null
         val candidates = mutableListOf<java.io.File>()
@@ -350,6 +405,15 @@ object ModelFileLoader {
                 val entryName = entry.name.replace("\\", "/")
                 if (!entry.isDirectory && !entryName.startsWith("__MACOSX") && !entryName.startsWith(".")) {
                     val outputFile = java.io.File(extractFolder, entryName)
+                    val canonicalDest = outputFile.canonicalPath
+
+                    // Zip-Slip attack prevention: verify target path is strictly within the extractFolder
+                    if (!canonicalDest.startsWith(canonicalExtractDir + java.io.File.separator) && canonicalDest != canonicalExtractDir) {
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                        continue
+                    }
+
                     outputFile.parentFile?.mkdirs()
                     outputFile.outputStream().use { fos ->
                         zis.copyTo(fos)

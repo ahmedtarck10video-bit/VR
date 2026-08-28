@@ -242,9 +242,9 @@ class ARCoreManager(private val context: Context) {
 
     /**
      * Hit-tests screen touch coordinates against real ARCore surfaces using Frame.hitTest.
-     * Returns the 3D surface intersection point and hit plane.
+     * Returns the 3D surface intersection point, hit plane, and real 6DOF ARCore Anchor.
      */
-     fun hitTest(screenNormX: Float, screenNormY: Float, viewWidthPx: Float = 1080f, viewHeightPx: Float = 1920f): Pair<ARTrackedPlane, Vec3>? {
+     fun hitTest(screenNormX: Float, screenNormY: Float, viewWidthPx: Float = 1080f, viewHeightPx: Float = 1920f): Triple<ARTrackedPlane, Vec3, Anchor?>? {
         val frame = latestFrame
         val planes = _trackedPlanes.value
 
@@ -270,7 +270,12 @@ class ARCoreManager(private val context: Context) {
                             polygon = emptyList(),
                             orientation = if (trackable.type == Plane.Type.VERTICAL) PlaneOrientation.VERTICAL else PlaneOrientation.HORIZONTAL_UPWARD
                         )
-                        return Pair(matchedPlane, hitVec)
+                        val anchor = try {
+                            hit.createAnchor()
+                        } catch (e: Exception) {
+                            null
+                        }
+                        return Triple(matchedPlane, hitVec, anchor)
                     }
                 }
             } catch (e: Exception) {
@@ -294,7 +299,7 @@ class ARCoreManager(private val context: Context) {
                 val halfX = plane.extentX * 0.7f
                 val halfZ = plane.extentZ * 0.7f
                 if (abs(hitX - plane.center.x) <= halfX && abs(hitZ - plane.center.z) <= halfZ) {
-                    return Pair(plane, Vec3(hitX, targetY, hitZ))
+                    return Triple(plane, Vec3(hitX, targetY, hitZ), null)
                 }
             } else if (plane.orientation == PlaneOrientation.VERTICAL) {
                 val targetZ = plane.center.z
@@ -303,7 +308,7 @@ class ARCoreManager(private val context: Context) {
                 val halfX = plane.extentX * 0.7f
                 val halfY = plane.extentZ * 0.7f
                 if (abs(hitX - plane.center.x) <= halfX && abs(hitY - plane.center.y) <= halfY) {
-                    return Pair(plane, Vec3(hitX, hitY, targetZ))
+                    return Triple(plane, Vec3(hitX, hitY, targetZ), null)
                 }
             }
         }

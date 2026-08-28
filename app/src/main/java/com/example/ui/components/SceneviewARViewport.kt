@@ -108,13 +108,22 @@ fun SceneviewARViewport(
                     val targetModel = model
                     val targetPath = targetModel?.localFilePath ?: targetModel?.fileUri?.toString()
 
-                    // Compute true 3D position (anchored to physical plane or placed at camera preview depth)
+                    // Compute true 3D position (live ARCore anchor pose with 6DOF persistence or placed at camera preview depth)
+                    val liveAnchorPose = surfaceAnchor?.arcoreAnchor?.pose
                     val targetPos = if (surfaceAnchor != null && isAnchored) {
-                        Position(
-                            x = surfaceAnchor.position.x + (panX * 0.001f),
-                            y = surfaceAnchor.position.y - (panY * 0.001f),
-                            z = surfaceAnchor.position.z
-                        )
+                        if (liveAnchorPose != null) {
+                            Position(
+                                x = liveAnchorPose.tx() + (panX * 0.001f),
+                                y = liveAnchorPose.ty() - (panY * 0.001f),
+                                z = liveAnchorPose.tz()
+                            )
+                        } else {
+                            Position(
+                                x = surfaceAnchor.position.x + (panX * 0.001f),
+                                y = surfaceAnchor.position.y - (panY * 0.001f),
+                                z = surfaceAnchor.position.z
+                            )
+                        }
                     } else {
                         Position(
                             x = panX * 0.002f,

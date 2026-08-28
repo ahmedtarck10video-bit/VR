@@ -42,5 +42,6 @@ data class ARSurfaceAnchor(
     val rotationY: Float = 0f,
     val scale: Float = 1.0f,
     val isGrounded: Boolean = true,
-    val surfaceType: PlaneOrientation = PlaneOrientation.HORIZONTAL_UPWARD
+    val surfaceType: PlaneOrientation = PlaneOrientation.HORIZONTAL_UPWARD,
+    val arcoreAnchor: com.google.ar.core.Anchor? = null
 )

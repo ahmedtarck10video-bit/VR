@@ -244,7 +244,7 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
     fun onSurfaceTapped(screenNormX: Float, screenNormY: Float) {
         val hitResult = arCoreManager.hitTest(screenNormX, screenNormY)
         if (hitResult != null) {
-            val (plane, hitPoint) = hitResult
+            val (plane, hitPoint, arAnchor) = hitResult
             val anchor = ARSurfaceAnchor(
                 id = "anchor_${System.currentTimeMillis()}",
                 planeId = plane.id,
@@ -253,7 +253,8 @@ class MixedRealityViewModel(application: Application) : AndroidViewModel(applica
                 rotationY = _uiState.value.rotY,
                 scale = _uiState.value.scale,
                 isGrounded = true,
-                surfaceType = plane.orientation
+                surfaceType = plane.orientation,
+                arcoreAnchor = arAnchor
             )
 
             _uiState.value = _uiState.value.copy(

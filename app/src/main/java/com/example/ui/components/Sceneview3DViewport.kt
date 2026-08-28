@@ -59,7 +59,7 @@ fun Sceneview3DViewport(
         modifier = modifier.fillMaxSize(),
         factory = { ctx ->
             SceneView(ctx).apply {
-                cameraNode.position = Position(0f, 0f, 4f)
+                cameraNode.position = Position(0f, 0f, 3.5f)
                 sceneViewRef = this
             }
         },
@@ -70,6 +70,12 @@ fun Sceneview3DViewport(
 
             if (targetModel != null && targetPath != null && targetPath != lastLoadedPath) {
                 lastLoadedPath = targetPath
+
+                // Dynamic camera distance framing based on authentic metric bounds without mutating geometry scale
+                val maxDim = maxOf(targetModel.realWorldHeightMeters, targetModel.realWorldWidthMeters, targetModel.realWorldDepthMeters)
+                val targetCameraDist = maxOf(1.8f, maxDim * 2.2f)
+                sceneView.cameraNode.position = Position(0f, 0f, targetCameraDist)
+
                 coroutineScope.launch {
                     try {
                         val filePath = targetModel.localFilePath
@@ -89,10 +95,8 @@ fun Sceneview3DViewport(
                                 sceneView.removeChildNode(oldNode)
                                 oldNode.destroy()
                             }
-                            val metricUnitScale = targetModel.realWorldHeightMeters.coerceIn(0.2f, 2.5f)
                             val newNode = ModelNode(
-                                modelInstance = instance,
-                                scaleToUnits = metricUnitScale
+                                modelInstance = instance
                             ).apply {
                                 this.position = Position(x = panX * 0.005f, y = -panY * 0.005f, z = 0f)
                                 this.scale = Scale(scale, scale, scale)
