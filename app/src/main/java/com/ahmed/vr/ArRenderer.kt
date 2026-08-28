@@ -12,8 +12,8 @@ import com.google.ar.core.Session
 /**
  * ArRenderer: minimal GL camera-texture manager that binds ARCore camera texture and
  * advances frames on a periodic callback so that camera passthrough appears promptly after resume.
- * This class intentionally keeps rendering responsibilities minimal — integration with
- * Sceneform/Filament should use the same texture id for their background or external texture.
+ * It delegates per-frame rendering work to a RendererIntegrator to allow renderer-specific
+ * composition (Filament/Sceneform) to be performed outside this low-level helper.
  */
 class ArRenderer(private val sessionManager: SessionManager) {
     companion object {
@@ -32,13 +32,17 @@ class ArRenderer(private val sessionManager: SessionManager) {
                 val session = sessionManager.session
                 if (session != null && sessionManager.state == SessionManager.State.RUNNING) {
                     val frame: Frame = session.update()
-                    // Ensure the SurfaceTexture is updated so the external texture contains the latest camera image
                     try {
                         surfaceTexture?.updateTexImage()
                     } catch (t: Throwable) {
                         Log.w(TAG, "updateTexImage failed: ${t.message}")
                     }
-                    // TODO: feed frame to render pipeline (Filament/Sceneform integration point)
+                    // Delegate rendering/composition to integrator if present
+                    try {
+                        integrator?.onFrame(frame)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Renderer integrator frame failure: ${t.message}")
+                    }
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "Frame update loop exception: ${t.message}")
@@ -48,8 +52,10 @@ class ArRenderer(private val sessionManager: SessionManager) {
         }
     }
 
+    // Integrator provided by the application to composite camera + depth + virtual content
+    var integrator: RendererIntegrator? = null
+
     fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-        // Create external texture if needed
         if (cameraTextureId == -1) {
             val textures = IntArray(1)
             GLES20.glGenTextures(1, textures, 0)
@@ -58,11 +64,8 @@ class ArRenderer(private val sessionManager: SessionManager) {
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
 
-            // Use the provided SurfaceTexture if the app's view provided one; otherwise create our own
             surfaceTexture = surface
-            // If we created our own we would assign: surfaceTexture = SurfaceTexture(cameraTextureId)
-
-            // If session already running, set the camera texture name so ARCore outputs into this texture
+            // Bind session camera texture if session already resumed
             trySetSessionCameraTexture()
         }
     }
