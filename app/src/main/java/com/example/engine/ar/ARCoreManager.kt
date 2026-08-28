@@ -85,7 +85,7 @@ class ARCoreManager(private val context: Context) {
             isARCoreAvailable = false
             session = null
             isSessionRunning = true
-            _trackingStatus.value = "Spatial Sensor Engine Active"
+            _trackingStatus.value = "Device Sensor Passthrough (Simulated)"
         }
 
         // Real plane detection only - zero synthetic planes

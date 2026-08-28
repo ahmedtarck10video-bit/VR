@@ -83,7 +83,7 @@ object ModelFileLoader {
         // Pass directly to SceneView / Filament ModelLoader without CPU triangle conversion!
         if (isNativeSceneAsset && finalFilePath != null && java.io.File(finalFilePath).exists()) {
             val file = java.io.File(finalFilePath)
-            val extractedDims = extractGltfOrGlbDimensions(file)
+            val extractedDims = extractUniversalAssetDimensions(file)
             val realW = extractedDims?.first ?: 0.5f
             val realH = extractedDims?.second ?: 0.5f
             val realD = extractedDims?.third ?: 0.5f
@@ -258,10 +258,88 @@ object ModelFileLoader {
                 found = true
             }
 
-            // Strategy 1: Compute bounds transformed by node hierarchy (matrix, quaternion rotation, scale, translation)
+            fun multiply4x4(a: FloatArray, b: FloatArray): FloatArray {
+                val r = FloatArray(16)
+                for (col in 0..3) {
+                    for (row in 0..3) {
+                        var sum = 0f
+                        for (k in 0..3) {
+                            sum += a[k * 4 + row] * b[col * 4 + k]
+                        }
+                        r[col * 4 + row] = sum
+                    }
+                }
+                return r
+            }
+
+            fun getNodeLocalMatrix(node: JSONObject): FloatArray {
+                val matrixArr = node.optJSONArray("matrix")
+                if (matrixArr != null && matrixArr.length() >= 16) {
+                    val m = FloatArray(16)
+                    for (i in 0..15) {
+                        m[i] = matrixArr.getDouble(i).toFloat()
+                    }
+                    return m
+                }
+
+                val scaleArr = node.optJSONArray("scale")
+                val sx = if (scaleArr != null && scaleArr.length() >= 3) scaleArr.getDouble(0).toFloat() else 1.0f
+                val sy = if (scaleArr != null && scaleArr.length() >= 3) scaleArr.getDouble(1).toFloat() else 1.0f
+                val sz = if (scaleArr != null && scaleArr.length() >= 3) scaleArr.getDouble(2).toFloat() else 1.0f
+
+                val rotArr = node.optJSONArray("rotation")
+                val hasRot = rotArr != null && rotArr.length() >= 4
+                val qx = if (hasRot) rotArr!!.getDouble(0).toFloat() else 0f
+                val qy = if (hasRot) rotArr!!.getDouble(1).toFloat() else 0f
+                val qz = if (hasRot) rotArr!!.getDouble(2).toFloat() else 0f
+                val qw = if (hasRot) rotArr!!.getDouble(3).toFloat() else 1f
+
+                val transArr = node.optJSONArray("translation")
+                val tx = if (transArr != null && transArr.length() >= 3) transArr.getDouble(0).toFloat() else 0.0f
+                val ty = if (transArr != null && transArr.length() >= 3) transArr.getDouble(1).toFloat() else 0.0f
+                val tz = if (transArr != null && transArr.length() >= 3) transArr.getDouble(2).toFloat() else 0.0f
+
+                val r00 = 1f - 2f * (qy * qy + qz * qz)
+                val r01 = 2f * (qx * qy - qz * qw)
+                val r02 = 2f * (qx * qz + qy * qw)
+
+                val r10 = 2f * (qx * qy + qz * qw)
+                val r11 = 1f - 2f * (qx * qx + qz * qz)
+                val r12 = 2f * (qy * qz - qx * qw)
+
+                val r20 = 2f * (qx * qz - qy * qw)
+                val r21 = 2f * (qy * qz + qx * qw)
+                val r22 = 1f - 2f * (qx * qx + qy * qy)
+
+                return floatArrayOf(
+                    r00 * sx, r10 * sx, r20 * sx, 0f,
+                    r01 * sy, r11 * sy, r21 * sy, 0f,
+                    r02 * sz, r12 * sz, r22 * sz, 0f,
+                    tx, ty, tz, 1f
+                )
+            }
+
+            // Strategy 1: Full Recursive Parent-Child Hierarchy Matrix Traversal
             if (nodes != null && meshBounds.isNotEmpty()) {
-                for (n in 0 until nodes.length()) {
+                val nodeCount = nodes.length()
+                val childSet = HashSet<Int>()
+
+                for (n in 0 until nodeCount) {
                     val node = nodes.optJSONObject(n) ?: continue
+                    val childrenArr = node.optJSONArray("children")
+                    if (childrenArr != null) {
+                        for (c in 0 until childrenArr.length()) {
+                            childSet.add(childrenArr.getInt(c))
+                        }
+                    }
+                }
+
+                fun traverseNode(nodeIdx: Int, parentWorldMatrix: FloatArray) {
+                    if (nodeIdx !in 0 until nodeCount) return
+                    val node = nodes.optJSONObject(nodeIdx) ?: return
+                    val localMat = getNodeLocalMatrix(node)
+                    val worldMat = multiply4x4(parentWorldMatrix, localMat)
+
                     val meshIdx = node.optInt("mesh", -1)
                     val b = meshBounds[meshIdx]
                     if (b != null) {
@@ -276,52 +354,38 @@ object ModelFileLoader {
                             floatArrayOf(b[3], b[4], b[5])
                         )
 
-                        val matrixArr = node.optJSONArray("matrix")
-                        if (matrixArr != null && matrixArr.length() >= 16) {
-                            val m0 = matrixArr.getDouble(0).toFloat(); val m4 = matrixArr.getDouble(4).toFloat(); val m8 = matrixArr.getDouble(8).toFloat(); val m12 = matrixArr.getDouble(12).toFloat()
-                            val m1 = matrixArr.getDouble(1).toFloat(); val m5 = matrixArr.getDouble(5).toFloat(); val m9 = matrixArr.getDouble(9).toFloat(); val m13 = matrixArr.getDouble(13).toFloat()
-                            val m2 = matrixArr.getDouble(2).toFloat(); val m6 = matrixArr.getDouble(6).toFloat(); val m10 = matrixArr.getDouble(10).toFloat(); val m14 = matrixArr.getDouble(14).toFloat()
+                        val m0 = worldMat[0]; val m4 = worldMat[4]; val m8 = worldMat[8]; val m12 = worldMat[12]
+                        val m1 = worldMat[1]; val m5 = worldMat[5]; val m9 = worldMat[9]; val m13 = worldMat[13]
+                        val m2 = worldMat[2]; val m6 = worldMat[6]; val m10 = worldMat[10]; val m14 = worldMat[14]
 
-                            for (c in corners) {
-                                val cx = c[0]; val cy = c[1]; val cz = c[2]
-                                val tx = m0 * cx + m4 * cy + m8 * cz + m12
-                                val ty = m1 * cx + m5 * cy + m9 * cz + m13
-                                val tz = m2 * cx + m6 * cy + m10 * cz + m14
-                                updateBounds(tx, ty, tz)
-                            }
-                        } else {
-                            val scaleArr = node.optJSONArray("scale")
-                            val sx = if (scaleArr != null && scaleArr.length() >= 3) scaleArr.getDouble(0).toFloat() else 1.0f
-                            val sy = if (scaleArr != null && scaleArr.length() >= 3) scaleArr.getDouble(1).toFloat() else 1.0f
-                            val sz = if (scaleArr != null && scaleArr.length() >= 3) scaleArr.getDouble(2).toFloat() else 1.0f
-
-                            val rotArr = node.optJSONArray("rotation")
-                            val hasRot = rotArr != null && rotArr.length() >= 4
-                            val qx = if (hasRot) rotArr!!.getDouble(0).toFloat() else 0f
-                            val qy = if (hasRot) rotArr!!.getDouble(1).toFloat() else 0f
-                            val qz = if (hasRot) rotArr!!.getDouble(2).toFloat() else 0f
-                            val qw = if (hasRot) rotArr!!.getDouble(3).toFloat() else 1f
-
-                            val transArr = node.optJSONArray("translation")
-                            val tx = if (transArr != null && transArr.length() >= 3) transArr.getDouble(0).toFloat() else 0.0f
-                            val ty = if (transArr != null && transArr.length() >= 3) transArr.getDouble(1).toFloat() else 0.0f
-                            val tz = if (transArr != null && transArr.length() >= 3) transArr.getDouble(2).toFloat() else 0.0f
-
-                            for (c in corners) {
-                                var cx = c[0] * sx
-                                var cy = c[1] * sy
-                                var cz = c[2] * sz
-
-                                if (hasRot) {
-                                    val rx = (1f - 2f * (qy * qy + qz * qz)) * cx + (2f * (qx * qy - qz * qw)) * cy + (2f * (qx * qz + qy * qw)) * cz
-                                    val ry = (2f * (qx * qy + qz * qw)) * cx + (1f - 2f * (qx * qx + qz * qz)) * cy + (2f * (qy * qz - qx * qw)) * cz
-                                    val rz = (2f * (qx * qz - qy * qw)) * cx + (2f * (qy * qz + qx * qw)) * cy + (1f - 2f * (qx * qx + qy * qy)) * cz
-                                    cx = rx; cy = ry; cz = rz
-                                }
-
-                                updateBounds(cx + tx, cy + ty, cz + tz)
-                            }
+                        for (c in corners) {
+                            val cx = c[0]; val cy = c[1]; val cz = c[2]
+                            val tx = m0 * cx + m4 * cy + m8 * cz + m12
+                            val ty = m1 * cx + m5 * cy + m9 * cz + m13
+                            val tz = m2 * cx + m6 * cy + m10 * cz + m14
+                            updateBounds(tx, ty, tz)
                         }
+                    }
+
+                    val childrenArr = node.optJSONArray("children")
+                    if (childrenArr != null) {
+                        for (c in 0 until childrenArr.length()) {
+                            traverseNode(childrenArr.getInt(c), worldMat)
+                        }
+                    }
+                }
+
+                val identity = floatArrayOf(
+                    1f, 0f, 0f, 0f,
+                    0f, 1f, 0f, 0f,
+                    0f, 0f, 1f, 0f,
+                    0f, 0f, 0f, 1f
+                )
+
+                // Traverse from roots
+                for (n in 0 until nodeCount) {
+                    if (!childSet.contains(n)) {
+                        traverseNode(n, identity)
                     }
                 }
             }
@@ -476,14 +540,135 @@ object ModelFileLoader {
             ?: candidates.firstOrNull()
 
         if (mainModelFile != null) {
-            try {
-                java.io.File(extractFolder, ".complete").createNewFile()
-            } catch (e: Exception) {
-                // Ignore marker creation failure
+            var isValid = true
+            // If main file is GLTF, verify that all declared buffer (.bin) and image (texture) files exist
+            if (mainModelFile.name.lowercase().endsWith(".gltf")) {
+                try {
+                    val gltfJson = JSONObject(mainModelFile.readText(Charsets.UTF_8))
+                    val buffers = gltfJson.optJSONArray("buffers")
+                    if (buffers != null) {
+                        for (i in 0 until buffers.length()) {
+                            val b = buffers.optJSONObject(i) ?: continue
+                            val uriStr = b.optString("uri")
+                            if (uriStr.isNotEmpty() && !uriStr.startsWith("data:")) {
+                                val binFile = java.io.File(mainModelFile.parentFile ?: extractFolder, uriStr)
+                                if (!binFile.exists() || binFile.length() == 0L) {
+                                    isValid = false
+                                    break
+                                }
+                            }
+                        }
+                    }
+
+                    if (isValid) {
+                        val images = gltfJson.optJSONArray("images")
+                        if (images != null) {
+                            for (i in 0 until images.length()) {
+                                val img = images.optJSONObject(i) ?: continue
+                                val uriStr = img.optString("uri")
+                                if (uriStr.isNotEmpty() && !uriStr.startsWith("data:")) {
+                                    val imgFile = java.io.File(mainModelFile.parentFile ?: extractFolder, uriStr)
+                                    if (!imgFile.exists()) {
+                                        // Texture missing is non-fatal for geometry but logged
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    isValid = false
+                }
+            }
+
+            if (isValid) {
+                try {
+                    java.io.File(extractFolder, ".complete").createNewFile()
+                } catch (e: Exception) {
+                    // Ignore marker creation failure
+                }
             }
         }
 
         return mainModelFile
+    }
+
+    /**
+     * Extracts physical dimensions from USD / USDA / USDZ files.
+     */
+    fun extractUsdOrUsdzDimensions(file: java.io.File): Triple<Float, Float, Float>? {
+        return try {
+            val lower = file.name.lowercase()
+            var usdaText: String? = null
+
+            if (lower.endsWith(".usdz") || lower.endsWith(".zip")) {
+                ZipInputStream(file.inputStream()).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val entryName = entry.name.lowercase()
+                        if (entryName.endsWith(".usda") || entryName.endsWith(".usd")) {
+                            usdaText = String(zis.readBytes(), Charsets.UTF_8)
+                            break
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                }
+            } else if (lower.endsWith(".usda") || lower.endsWith(".usd")) {
+                usdaText = file.readText(Charsets.UTF_8)
+            }
+
+            if (usdaText == null) return null
+
+            // Parse metersPerUnit (default in USD is 0.01 for centimeters)
+            var metersPerUnit = 0.01f
+            val metersRegex = """metersPerUnit\s*=\s*([0-9.]+)""".toRegex()
+            metersRegex.find(usdaText!!)?.let { match ->
+                match.groupValues.getOrNull(1)?.toFloatOrNull()?.let { metersPerUnit = it }
+            }
+
+            var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+            var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+            var found = false
+
+            // Scan point3f / float3 points
+            val pointRegex = """\((-?[0-9.]+(?:[eE][-+]?[0-9]+)?),\s*(-?[0-9.]+(?:[eE][-+]?[0-9]+)?),\s*(-?[0-9.]+(?:[eE][-+]?[0-9]+)?)\)""".toRegex()
+            for (m in pointRegex.findAll(usdaText!!)) {
+                val x = m.groupValues[1].toFloatOrNull() ?: continue
+                val y = m.groupValues[2].toFloatOrNull() ?: continue
+                val z = m.groupValues[3].toFloatOrNull() ?: continue
+                minX = min(minX, x * metersPerUnit)
+                minY = min(minY, y * metersPerUnit)
+                minZ = min(minZ, z * metersPerUnit)
+                maxX = max(maxX, x * metersPerUnit)
+                maxY = max(maxY, y * metersPerUnit)
+                maxZ = max(maxZ, z * metersPerUnit)
+                found = true
+            }
+
+            if (found && maxX >= minX && maxY >= minY && maxZ >= minZ) {
+                Triple(
+                    max(0.001f, maxX - minX),
+                    max(0.001f, maxY - minY),
+                    max(0.001f, maxZ - minZ)
+                )
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Universal dimension extractor for all 3D asset types.
+     */
+    fun extractUniversalAssetDimensions(file: java.io.File): Triple<Float, Float, Float>? {
+        val lower = file.name.lowercase()
+        return when {
+            lower.endsWith(".glb") || lower.endsWith(".gltf") -> extractGltfOrGlbDimensions(file)
+            lower.endsWith(".usdz") || lower.endsWith(".usda") || lower.endsWith(".usd") -> extractUsdOrUsdzDimensions(file)
+            else -> extractGltfOrGlbDimensions(file) ?: extractUsdOrUsdzDimensions(file)
+        }
     }
 
     /**

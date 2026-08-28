@@ -62,10 +62,10 @@ fun ARScreen(
             // Unified Hardware-Accelerated AR Mode with Google ARCore & Filament
             SceneviewARViewport(
                 model = currentModel,
-                rotX = uiState.rotX + gyroPitch,
-                rotY = uiState.rotY + gyroRoll + (uiState.surfaceAnchor?.rotationY ?: 0f),
-                rotZ = 0f,
-                scale = uiState.scale * (uiState.surfaceAnchor?.scale ?: 1.0f),
+                rotX = uiState.rotX,
+                rotY = uiState.rotY,
+                rotZ = uiState.rotZ,
+                scale = uiState.scale,
                 panX = uiState.panX,
                 panY = uiState.panY,
                 modifier = Modifier

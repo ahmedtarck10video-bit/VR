@@ -109,9 +109,12 @@ fun SceneviewARViewport(
                     val targetModel = model
                     val targetPath = targetModel?.localFilePath ?: targetModel?.fileUri?.toString()
 
-                    // Compute true 3D position (live ARCore anchor pose with 6DOF persistence and anchor-local pan)
+                    // Compute unified 3D Transform (live ARCore anchor pose with 6DOF persistence, anchor-local pan, and user yaw)
                     val liveAnchorPose = surfaceAnchor?.arcoreAnchor?.pose
-                    val targetPos = if (surfaceAnchor != null && isAnchored) {
+                    val finalPosition: Position
+                    val finalRotation: Rotation
+
+                    if (surfaceAnchor != null && isAnchored) {
                         val isVertical = surfaceAnchor.surfaceType == PlaneOrientation.VERTICAL
                         val localDx = panX * 0.001f
                         val localDy = if (isVertical) -panY * 0.001f else 0f
@@ -119,24 +122,59 @@ fun SceneviewARViewport(
 
                         if (liveAnchorPose != null) {
                             val localOffsetPose = com.google.ar.core.Pose.makeTranslation(localDx, localDy, localDz)
-                            val combinedPose = liveAnchorPose.compose(localOffsetPose)
-                            Position(
+                            val userYawPose = com.google.ar.core.Pose.makeRotation(
+                                0f,
+                                kotlin.math.sin(rotY / 2f),
+                                0f,
+                                kotlin.math.cos(rotY / 2f)
+                            )
+                            val combinedPose = liveAnchorPose.compose(localOffsetPose).compose(userYawPose)
+                            finalPosition = Position(
                                 x = combinedPose.tx(),
                                 y = combinedPose.ty(),
                                 z = combinedPose.tz()
                             )
+
+                            // Extract Euler angles from combined anchor quaternion
+                            val q = combinedPose.rotationQuaternion // [x, y, z, w]
+                            val sinr_cosp = 2f * (q[3] * q[0] + q[1] * q[2])
+                            val cosr_cosp = 1f - 2f * (q[0] * q[0] + q[1] * q[1])
+                            val roll = kotlin.math.atan2(sinr_cosp, cosr_cosp) * 180f / Math.PI.toFloat()
+
+                            val sinp = 2f * (q[3] * q[1] - q[2] * q[0])
+                            val pitch = if (kotlin.math.abs(sinp) >= 1f) {
+                                (if (sinp > 0) Math.PI.toFloat() / 2f else -Math.PI.toFloat() / 2f) * 180f / Math.PI.toFloat()
+                            } else {
+                                kotlin.math.asin(sinp) * 180f / Math.PI.toFloat()
+                            }
+
+                            val siny_cosp = 2f * (q[3] * q[2] + q[0] * q[1])
+                            val cosy_cosp = 1f - 2f * (q[1] * q[1] + q[2] * q[2])
+                            val yaw = kotlin.math.atan2(siny_cosp, cosy_cosp) * 180f / Math.PI.toFloat()
+
+                            finalRotation = Rotation(x = roll, y = pitch, z = yaw)
                         } else {
-                            Position(
+                            finalPosition = Position(
                                 x = surfaceAnchor.position.x + localDx,
                                 y = surfaceAnchor.position.y + localDy,
                                 z = surfaceAnchor.position.z + localDz
                             )
+                            finalRotation = Rotation(
+                                x = rotX * 180f / Math.PI.toFloat(),
+                                y = rotY * 180f / Math.PI.toFloat(),
+                                z = rotZ * 180f / Math.PI.toFloat()
+                            )
                         }
                     } else {
-                        Position(
+                        finalPosition = Position(
                             x = panX * 0.002f,
                             y = -panY * 0.002f,
                             z = -1.2f
+                        )
+                        finalRotation = Rotation(
+                            x = rotX * 180f / Math.PI.toFloat(),
+                            y = rotY * 180f / Math.PI.toFloat(),
+                            z = rotZ * 180f / Math.PI.toFloat()
                         )
                     }
 
@@ -162,12 +200,9 @@ fun SceneviewARViewport(
                                     val newNode = ModelNode(
                                         modelInstance = instance
                                     ).apply {
-                                        this.position = targetPos
+                                        this.position = finalPosition
                                         this.scale = Scale(scale, scale, scale)
-                                        val finalRotY = (rotY * 180f / Math.PI.toFloat())
-                                        val finalRotX = (rotX * 180f / Math.PI.toFloat())
-                                        val finalRotZ = (rotZ * 180f / Math.PI.toFloat())
-                                        this.rotation = Rotation(x = finalRotX, y = finalRotY, z = finalRotZ)
+                                        this.rotation = finalRotation
                                     }
                                     arSceneView.addChildNode(newNode)
                                     currentModelNode = newNode
@@ -178,12 +213,9 @@ fun SceneviewARViewport(
                         }
                     } else {
                         currentModelNode?.let { node ->
-                            node.position = targetPos
+                            node.position = finalPosition
                             node.scale = Scale(scale, scale, scale)
-                            val finalRotY = (rotY * 180f / Math.PI.toFloat())
-                            val finalRotX = (rotX * 180f / Math.PI.toFloat())
-                            val finalRotZ = (rotZ * 180f / Math.PI.toFloat())
-                            node.rotation = Rotation(x = finalRotX, y = finalRotY, z = finalRotZ)
+                            node.rotation = finalRotation
                         }
                     }
                 }
